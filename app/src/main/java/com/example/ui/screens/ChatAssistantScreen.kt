@@ -1,10 +1,5 @@
 package com.example.ui.screens
 
-import android.app.Activity
-import android.content.Intent
-import android.speech.RecognizerIntent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -73,7 +68,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.rag.RAGQueryResult
-import com.example.data.speech.SpeechContextPolisher
 import com.example.ui.ChatMessage
 import com.example.ui.MainViewModel
 import com.example.ui.theme.CyanNeon
@@ -95,26 +89,9 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
 
     var inputPrompt by remember { mutableStateOf("") }
     var autoSpeakEnabled by remember { mutableStateOf(true) }
-    var isListening by remember { mutableStateOf(false) }
     var showTtsSettings by remember { mutableStateOf(false) }
+    var showDictation by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-
-    // Speech recognition launcher
-    val speechLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            if (!spoken.isNullOrEmpty()) {
-                val polished = SpeechContextPolisher.polishDictation(spoken[0])
-                inputPrompt = polished
-                // Auto-send when speaking to assistant
-                viewModel.sendChatMessage(polished, autoSpeak = autoSpeakEnabled)
-                inputPrompt = ""
-            }
-        }
-        isListening = false
-    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -438,25 +415,13 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                 }
 
                 IconButton(
-                    onClick = {
-                        isListening = true
-                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Habla tu consulta al asistente...")
-                        }
-                        try {
-                            speechLauncher.launch(intent)
-                        } catch (_: Exception) {
-                            isListening = false
-                        }
-                    },
+                    onClick = { showDictation = true },
                     modifier = Modifier.testTag("voice_assistant_mic_btn")
                 ) {
                     Icon(
                         Icons.Default.Mic,
                         contentDescription = "Hablar al asistente",
-                        tint = if (isListening) CyanNeon else Slate400
+                        tint = CyanNeon
                     )
                 }
 
@@ -498,6 +463,16 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
     if (showTtsSettings) {
         TtsSettingsDialog(viewModel = viewModel, onDismiss = { showTtsSettings = false })
     }
+
+    if (showDictation) {
+        VoiceDictationDialog(
+            onDismiss = { showDictation = false },
+            onSend = { text ->
+                showDictation = false
+                viewModel.sendChatMessage(text, autoSpeak = autoSpeakEnabled)
+            }
+        )
+    }
 }
 
 @Composable
@@ -507,9 +482,12 @@ private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
     val savedVoice by viewModel.ttsVoiceName.collectAsStateWithLifecycle()
     var localRate by remember { mutableStateOf(savedRate) }
     var localPitch by remember { mutableStateOf(savedPitch) }
+    var localVoice by remember { mutableStateOf<String?>(null) } // null = usar la voz guardada
     val voices = remember { viewModel.getSpanishVoiceOptions() }
     var voiceMenuOpen by remember { mutableStateOf(false) }
-    val currentVoiceLabel = voices.firstOrNull { it.first == savedVoice }?.second ?: "Predeterminada (es-ES)"
+    val effectiveVoice = localVoice ?: savedVoice
+    val currentVoiceLabel = voices.firstOrNull { it.first == effectiveVoice }?.second
+        ?: if (effectiveVoice.isBlank()) "Predeterminada (es-ES)" else effectiveVoice
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -527,14 +505,14 @@ private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
                     value = localRate,
                     onValueChange = { localRate = it },
                     valueRange = 0.5f..2.0f,
-                    onValueChangeFinished = { viewModel.updateTtsSettings(rate = localRate) }
+                    onValueChangeFinished = { viewModel.applyTtsPreview(localRate, localPitch, localVoice) }
                 )
                 Text("Tono: x" + "%.2f".format(localPitch), color = Slate400, fontSize = 12.sp)
                 Slider(
                     value = localPitch,
                     onValueChange = { localPitch = it },
                     valueRange = 0.5f..2.0f,
-                    onValueChangeFinished = { viewModel.updateTtsSettings(pitch = localPitch) }
+                    onValueChangeFinished = { viewModel.applyTtsPreview(localRate, localPitch, localVoice) }
                 )
                 Text("Voz (${voices.size} disponibles en español):", color = Slate400, fontSize = 12.sp)
                 Box {
@@ -559,7 +537,8 @@ private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
                         DropdownMenuItem(
                             text = { Text("Predeterminada (es-ES)", fontSize = 12.sp) },
                             onClick = {
-                                viewModel.updateTtsSettings(voiceName = "")
+                                localVoice = ""
+                                viewModel.applyTtsPreview(localRate, localPitch, localVoice)
                                 voiceMenuOpen = false
                             }
                         )
@@ -567,23 +546,47 @@ private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
                             DropdownMenuItem(
                                 text = { Text(v.second, fontSize = 12.sp) },
                                 onClick = {
-                                    viewModel.updateTtsSettings(voiceName = v.first)
+                                    localVoice = v.first
+                                    viewModel.applyTtsPreview(localRate, localPitch, localVoice)
                                     voiceMenuOpen = false
                                 }
                             )
                         }
                     }
                 }
+
+                // Botón de prueba: escucha la voz ANTES de guardar
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(CyanNeon.copy(alpha = 0.15f))
+                        .border(1.dp, CyanNeon, RoundedCornerShape(8.dp))
+                        .clickable {
+                            viewModel.applyTtsPreview(localRate, localPitch, localVoice)
+                            viewModel.speakSample()
+                        }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp))
+                        Text("Probar cómo suena", color = CyanNeon, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                viewModel.updateTtsSettings(rate = localRate, pitch = localPitch)
+                viewModel.updateTtsSettings(rate = localRate, pitch = localPitch, voiceName = localVoice ?: savedVoice)
                 onDismiss()
             }) { Text("Guardar", color = CyanNeon) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancelar", color = Slate400) }
+            TextButton(onClick = {
+                viewModel.restoreTtsSettings()
+                onDismiss()
+            }) { Text("Cancelar", color = Slate400) }
         }
     )
 }

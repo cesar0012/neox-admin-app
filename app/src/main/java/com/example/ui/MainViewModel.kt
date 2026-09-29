@@ -8,11 +8,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.AppDatabase
 import com.example.data.model.ChatMessageEntity
+import com.example.data.model.ConfidenceLevels
 import com.example.data.model.ConversationSession
 import com.example.data.model.DocumentItem
 import com.example.data.model.JobProject
 import com.example.data.model.MeetingNote
 import com.example.data.model.ProcessingQueueItem
+import com.example.data.model.TaskTypes
 import com.example.data.model.VaultEntry
 import com.example.data.model.WorkTask
 import com.example.data.nlp.SpanishDateParser
@@ -347,6 +349,155 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         tts?.stop()
     }
 
+    /** Aplica velocidad/tono/voz al motor TTS sin persistir (para previsualizar en ajustes). */
+    fun applyTtsPreview(rate: Float, pitch: Float, voiceName: String? = null) {
+        val engine = tts ?: return
+        try {
+            engine.setSpeechRate(rate.coerceIn(0.5f, 2.0f))
+            engine.setPitch(pitch.coerceIn(0.5f, 2.0f))
+            val target = voiceName ?: prefs.getTtsVoiceName()
+            val match = if (target.isNotBlank()) engine.voices?.firstOrNull { it.name == target } else null
+            if (match != null) engine.voice = match else engine.language = Locale("es", "ES")
+        } catch (t: Throwable) {
+            android.util.Log.e("MainViewModel", "applyTtsPreview error: ${t.message}", t)
+        }
+    }
+
+    /** Reproduce una muestra de voz con la configuración actual del motor. */
+    fun speakSample() {
+        speak("Hola, soy tu asistente Neox Admin. Así se escucha esta voz con la velocidad y el tono que elegiste.")
+    }
+
+    /** Restaura la configuración TTS persistida (al cancelar la previsualización). */
+    fun restoreTtsSettings() = applyTtsConfig()
+
+    // ---------------------------------------------------------------------------------
+    // SUB-AGENTE EXTRACTOR: convierte lenguaje conversacional en fichas de tarea
+    // con título técnico (nunca literal), tipo, prioridad, fecha y confianza.
+    // ---------------------------------------------------------------------------------
+
+    data class ExtractedTaskDetails(
+        val title: String,
+        val description: String,
+        val taskType: String,
+        val priority: String,
+        val dueTimestamp: Long, // 0 = sin fecha especificada
+        val confidence: String,
+        val viaLLM: Boolean
+    )
+
+    private fun recentHistoryText(): String {
+        val history = _chatMessages.value
+            .filter { it.text.isNotBlank() }
+            .takeLast(CHAT_HISTORY_WINDOW + 1)
+            .dropLast(1)
+        if (history.isEmpty()) return ""
+        return "HISTORIAL RECIENTE:\n" + history.joinToString("\n") { m ->
+            val role = if (m.sender == "USER") "Usuario" else "Asistente"
+            "$role: ${if (m.text.length > CHAT_HISTORY_MAX_CHARS) m.text.take(CHAT_HISTORY_MAX_CHARS) + "..." else m.text}"
+        } + "\n\n"
+    }
+
+    private suspend fun extractTaskDetailsViaLLM(userText: String, activeProject: String, history: String): ExtractedTaskDetails? {
+        val systemPrompt = """
+            Eres un SUB-AGENTE EXTRACTOR de tareas de un asistente ejecutivo. Recibes el mensaje conversacional del usuario y produces la ficha de lo que pidió agendar.
+
+            REGLAS DE TÍTULO (CRÍTICAS):
+            - Corto (máximo 8 palabras), técnico y orientado a la acción.
+            - NUNCA copies frases literales del usuario ni sus opiniones o disgusto ("no me gustó cómo..." JAMÁS va en el título).
+            - Ejemplo: "No me gustó cómo quedaron los envíos de los templates HTML, agenda una junta para el viernes" → Título: "Junta: revisar templates HTML de envíos".
+            - Si pide junta, inicia con "Junta:". Si es llamada, "Llamada:". Si es entrega, "Entrega:".
+
+            REGLAS DE FECHA:
+            - Devuelve la fecha en lenguaje natural tal cual se entiende ("viernes", "mañana", "en 3 días", "25/12/2026") o "sin fecha" si el usuario no mencionó ninguna. NUNCA fechas pasadas.
+
+            Responde EXACTAMENTE con este formato (sin texto extra):
+            ---TITULO---
+            [título técnico corto]
+            ---DESCRIPCION---
+            [resumen del contexto del pedido en 1-2 líneas]
+            ---TIPO---
+            [TAREA o JUNTA o LLAMADA o ENTREGA o RECORDATORIO]
+            ---PRIORIDAD---
+            [ALTA o MEDIA o BAJA]
+            ---FECHA---
+            [fecha natural o "sin fecha"]
+            ---CONFIANZA---
+            [ALTA si el pedido fue claro; MEDIA si es ambiguo o implícito; BAJA si es muy incierto]
+        """.trimIndent()
+
+        val userPrompt = "Proyecto activo: $activeProject\n$history\nMENSAJE DEL USUARIO:\n$userText"
+
+        val result = rotator.executeWithRotation(
+            systemPrompt = systemPrompt,
+            userPrompt = userPrompt,
+            lane = ModelLane.REASONING,
+            maxTokens = 400
+        )
+        if (!result.isSuccess) return null
+        val output = LLMRotator.cleanModelResponse(result.getOrNull().orEmpty())
+
+        fun section(marker: String, next: String): String {
+            val start = output.indexOf(marker)
+            if (start == -1) return ""
+            val from = start + marker.length
+            val end = output.indexOf(next, from).let { if (it == -1) output.length else it }
+            return output.substring(from, end).trim()
+        }
+
+        val title = section("---TITULO---", "---DESCRIPCION---").replace(Regex("^[\"'\\[\\]]+|[\"'\\[\\]]+$"), "").trim()
+        if (title.isBlank() || title.length > 120) return null
+
+        val description = section("---DESCRIPCION---", "---TIPO---").ifBlank { "Agendado desde el asistente conversacional" }
+        val typeRaw = section("---TIPO---", "---PRIORIDAD---").uppercase(Locale.getDefault()).trim()
+        val prioRaw = section("---PRIORIDAD---", "---FECHA---").uppercase(Locale.getDefault()).trim()
+        val fechaText = section("---FECHA---", "---CONFIANZA---").trim()
+        val confRaw = section("---CONFIANZA---", "---FIN---").uppercase(Locale.getDefault()).trim()
+
+        val due = resolveDateTextToTimestamp(fechaText)
+        return ExtractedTaskDetails(
+            title = title,
+            description = description,
+            taskType = if (TaskTypes.isValid(typeRaw)) typeRaw else TaskTypes.detect(userText.lowercase(Locale.getDefault())),
+            priority = if (prioRaw in listOf("ALTA", "MEDIA", "BAJA")) prioRaw else "MEDIA",
+            dueTimestamp = due,
+            confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.MEDIA,
+            viaLLM = true
+        )
+    }
+
+    /** Texto natural de fecha -> timestamp SIEMPRE futuro; 0 cuando no hay fecha válida. */
+    private fun resolveDateTextToTimestamp(fechaText: String?): Long {
+        if (fechaText.isNullOrBlank()) return 0L
+        val clean = fechaText.trim().lowercase(Locale.getDefault())
+        if (clean == "-" || clean == "sin fecha" || clean == "sin especificar" || clean == "n/a") return 0L
+        return SpanishDateParser.resolveDueTimestamp(clean) ?: 0L
+    }
+
+    /** Fallback sin LLM: extracción ingenua pero con tipo, confianza MEDIA y sin fecha si no se dijo. */
+    private fun naiveTaskExtraction(inputText: String, activeProject: String): ExtractedTaskDetails {
+        val lower = inputText.lowercase(Locale.getDefault())
+        val rawTitle = inputText
+            .replace(Regex("^(?:por\\s+favor\\s+)?(?:también\\s+te\\s+comento\\s+(?:que\\s+)?)?(?:te\\s+)?(?:crea(?:r)?|agrega(?:r)?|anota(?:r)?|guarda(?:r)?|agenda(?:r)?|recuérdame|recuerdame|necesito\\s+tener\\s+lista)\\s+(?:una\\s+|la\\s+|esta\\s+|el\\s+)?(?:tarea|recordatorio|pendiente|junta|reunión|reunion)?\\s*(?:de|que|para)?\\s*", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s+(?:para|el|la)\\s+(?:el\\s+|la\\s+)?(?:pr[oó]xim[oa]\\s+|siguiente\\s+)?(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|mañana|manana|hoy)(?:\\s+que\\s+viene|\\s+pr[oó]xim[oa])?\\s*$", RegexOption.IGNORE_CASE), "")
+            .trim().trimEnd('.', '!', '?')
+        val title = rawTitle.ifBlank { "Tarea pendiente" }.replaceFirstChar { it.uppercase(Locale.getDefault()) }
+        val due = SpanishDateParser.resolveDueTimestamp(lower) ?: 0L
+        return ExtractedTaskDetails(
+            title = title,
+            description = "Anotada mediante dictado al asistente (sin refinamiento de título por modelo)",
+            taskType = TaskTypes.detect(lower),
+            priority = if (lower.contains("urgente") || lower.contains("alta")) "ALTA" else if (lower.contains("baja")) "BAJA" else "MEDIA",
+            dueTimestamp = due,
+            confidence = ConfidenceLevels.MEDIA,
+            viaLLM = false
+        )
+    }
+
+    private fun formatDueForHumans(dueTimestamp: Long): String =
+        if (dueTimestamp <= 0L) "sin fecha ni hora especificadas"
+        else SimpleDateFormat("EEEE d 'de' MMMM, HH:mm", Locale("es", "ES")).format(Date(dueTimestamp))
+
     fun unlockApp(pin: String): Boolean {
         val saved = prefs.getPin()
         if (saved.isBlank() || saved == pin.trim()) {
@@ -373,15 +524,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         jobTag: String,
         dueTimestamp: Long,
         priority: String = "MEDIA",
-        originRef: String = ""
+        originRef: String = "",
+        taskType: String = TaskTypes.TAREA,
+        confidence: String = ConfidenceLevels.ALTA
     ) {
         viewModelScope.launch {
+            val safeType = if (TaskTypes.isValid(taskType)) taskType else TaskTypes.TAREA
+            val safeConfidence = if (ConfidenceLevels.isValid(confidence)) confidence else ConfidenceLevels.ALTA
             val task = WorkTask(
                 title = title,
                 description = description,
                 jobTag = jobTag,
                 dueTimestamp = dueTimestamp,
                 priority = priority,
+                taskType = safeType,
+                confidence = safeConfidence,
                 originReference = originRef
             )
             val id = db.taskDao().insertTask(task)
@@ -392,18 +549,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 sourceType = "TASK",
                 title = title,
                 jobTag = jobTag,
-                content = "$title: $description (Prioridad $priority, Fecha: ${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(dueTimestamp))})"
+                content = "$title: $description (Prioridad $priority${if (dueTimestamp > 0) ", Fecha: " + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(dueTimestamp)) else ", Sin fecha"})"
             )
 
             // Proactive reminder
-            val reminderTimeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(dueTimestamp))
-            ReminderNotificationHelper.showTaskReminder(
-                getApplication(),
-                id.toInt(),
-                title,
-                "Programada para las $reminderTimeStr ($priority)",
-                jobTag,
-                "Recordatorio Proactivo"
+            if (dueTimestamp > System.currentTimeMillis()) {
+                val reminderTimeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(dueTimestamp))
+                ReminderNotificationHelper.showTaskReminder(
+                    getApplication(),
+                    id.toInt(),
+                    title,
+                    "Programada para las $reminderTimeStr ($priority)",
+                    jobTag,
+                    "Recordatorio Proactivo"
+                )
+            }
+        }
+    }
+
+    /** Edición completa de una tarea desde la UI de agenda. */
+    fun updateTaskDetails(
+        task: WorkTask,
+        newTitle: String,
+        newDescription: String,
+        newType: String,
+        newPriority: String,
+        newDueTimestamp: Long,
+        newJobTag: String
+    ) {
+        viewModelScope.launch {
+            val updated = task.copy(
+                title = newTitle.trim(),
+                description = newDescription.trim(),
+                taskType = if (TaskTypes.isValid(newType)) newType else task.taskType,
+                priority = newPriority,
+                dueTimestamp = newDueTimestamp,
+                jobTag = newJobTag
+            )
+            db.taskDao().updateTask(updated)
+            db.memoryDao().deleteChunksBySource(updated.id, "TASK")
+            ragEngine.indexContent(
+                updated.id, "TASK", updated.title, updated.jobTag,
+                "Tarea: ${updated.title}. Tipo: ${TaskTypes.labelOf(updated.taskType)}. ${updated.description}"
+            )
+        }
+    }
+
+    /** Edición de una junta/minuta (título y proyecto). */
+    fun updateMeetingDetails(meeting: MeetingNote, newTitle: String, newJobTag: String) {
+        viewModelScope.launch {
+            val updated = meeting.copy(title = newTitle.trim(), jobTag = newJobTag)
+            db.meetingDao().updateMeeting(updated)
+            db.memoryDao().deleteChunksBySource(updated.id, "MEETING")
+            ragEngine.indexContent(
+                updated.id, "MEETING", updated.title, updated.jobTag,
+                "${updated.title}\nResumen: ${updated.executiveSummary}"
             )
         }
     }
@@ -545,6 +745,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     jobTag = jobTag,
                                     dueTimestamp = System.currentTimeMillis() + 86400 * 1000L,
                                     priority = "ALTA",
+                                    taskType = TaskTypes.detect(cleanAction.lowercase(Locale.getDefault())),
+                                    confidence = ConfidenceLevels.MEDIA,
                                     originReference = "Junta: ${parsed.title}"
                                 )
                             )
@@ -802,12 +1004,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ESTÁS TRABAJANDO EXCLUSIVAMENTE EN EL PROYECTO: "$activeProject".
                 - Todas las respuestas, análisis y contexto pertenecen a "$activeProject".
                 - Usa el HISTORIAL RECIENTE para entender correcciones: si el usuario dice que algo quedó mal o da una nueva fecha, se refiere a lo hablado antes.
-                - Si el usuario te pide en lenguaje conversacional crear una tarea, concluirla, borrarla, re-agendarla o guardar una nota, añade al final de tu respuesta el comando correspondiente:
-                  Para crear tarea: ---ACTION:CREATE_TASK|titulo|prioridad|dias|fecha(opcional dd/MM/yyyy)---
-                  Para re-agendar/cambiar fecha de una tarea (incluye cuando el usuario corrige una fecha mal agendada): ---ACTION:RESCHEDULE_TASK|titulo|dias|fecha(opcional dd/MM/yyyy)---
-                  Para concluir tarea: ---ACTION:COMPLETE_TASK|titulo---
-                  Para borrar tarea: ---ACTION:DELETE_TASK|titulo---
-                  Para guardar nota en RAG: ---ACTION:SAVE_NOTE|titulo|contenido---
+                - Si el usuario pide agendar algo, usa el comando con esta especificación:
+                  ---ACTION:CREATE_TASK|titulo|prioridad|fechaTexto|tipo|confianza---
+                  * titulo: CORTO (máx 8 palabras), técnico y orientado a acción. NUNCA frases literales del usuario ni sus opiniones ("no me gustó..." jamás va en un título). Junta → "Junta: ...".
+                  * prioridad: ALTA / MEDIA / BAJA.
+                  * fechaTexto: la fecha en lenguaje natural tal como la entiendes ("viernes", "mañana", "en 3 días", "25/12/2026") o "-" si el usuario NO mencionó fecha.
+                  * tipo: TAREA / JUNTA / LLAMADA / ENTREGA / RECORDATORIO (según lo pedido: reunión=junta, llamada telefónica=llamada, deadline o envío=entrega).
+                  * confianza: ALTA si el pedido fue claro, MEDIA si ambiguo, BAJA si muy incierto.
+                - Para re-agendar/cambiar fecha (incluye cuando el usuario corrige una fecha mal agendada):
+                  ---ACTION:RESCHEDULE_TASK|titulo|fechaTexto---
+                - Para concluir tarea: ---ACTION:COMPLETE_TASK|titulo---
+                - Para borrar tarea: ---ACTION:DELETE_TASK|titulo---
+                - Para guardar nota en RAG: ---ACTION:SAVE_NOTE|titulo|contenido---
             """.trimIndent()
         }
 
@@ -820,7 +1028,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             CONTEXTO TEMPORAL (REGLA CRÍTICA):
             - FECHA Y HORA ACTUAL: $nowStr.
-            - NUNCA agendes nada en fechas pasadas. Cuando el usuario mencione un día de la semana ("viernes"), significa SIEMPRE el PRÓXIMO viernes FUTURO a partir de la FECHA ACTUAL; calcula "dias" como la diferencia hacia esa fecha futura (0 = hoy, 1 = mañana...).
+            - NUNCA agendes nada en fechas pasadas. Cuando el usuario mencione un día de la semana ("viernes"), significa SIEMPRE el PRÓXIMO viernes FUTURO a partir de la FECHA ACTUAL; en fechaTexto escribe el día tal cual ("viernes") y el sistema calcula la fecha exacta.
+            - Si el usuario no menciona fecha, usa "-" como fechaTexto: la junta/tarea queda pendiente SIN fecha (aparece en tareas, no en calendario).
             - Si el usuario corrige una fecha ("no, es para el siguiente viernes"), re-agenda la tarea con RESCHEDULE_TASK en lugar de crear una nueva.
 
             INSTRUCCIONES CLAVE DE FORMATO Y ESTILO:
@@ -858,20 +1067,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return Triple(finalReply, rotator.resolve()?.modelKey, relevantChunks)
     }
 
-    /** Resuelve el vencimiento de una acción LLM: fecha dd/MM/yyyy futura válida, o días (nunca negativos). */
-    private fun resolveActionDueTimestamp(dateParam: String?, daysParam: String?): Long {
-        val now = System.currentTimeMillis()
-        if (!dateParam.isNullOrBlank()) {
-            try {
-                val fmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).apply { isLenient = false }
-                val parsed = fmt.parse(dateParam.trim())
-                if (parsed != null && parsed.time > now) return parsed.time
-            } catch (_: Exception) { /* fecha inválida o pasada: se ignora */ }
-        }
-        val days = (daysParam?.trim()?.toLongOrNull() ?: 2L).coerceIn(0L, 365L)
-        return if (days <= 0L) now + 4 * 3600_000L else now + days * 86400_000L
-    }
-
     private suspend fun processLLMActions(reply: String, activeProject: String): String {
         val actionRegex = Regex("---ACTION:([A-Z_]+)\\|(.*?)---")
         val match = actionRegex.find(reply) ?: return reply
@@ -886,10 +1081,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val confirmationText = when (actionType) {
             "CREATE_TASK" -> {
+                // ---ACTION:CREATE_TASK|titulo|prioridad|fechaTexto|tipo|confianza---
                 val parts = payload.split("|")
                 val title = parts.getOrNull(0)?.trim()?.ifBlank { "Nueva tarea" } ?: "Nueva tarea"
                 val priority = parts.getOrNull(1)?.trim()?.uppercase(Locale.getDefault()) ?: "MEDIA"
-                val due = resolveActionDueTimestamp(parts.getOrNull(3), parts.getOrNull(2))
+                val due = resolveDateTextToTimestamp(parts.getOrNull(2))
+                val typeRaw = parts.getOrNull(3)?.trim()?.uppercase(Locale.getDefault()).orEmpty()
+                val confRaw = parts.getOrNull(4)?.trim()?.uppercase(Locale.getDefault()).orEmpty()
 
                 val task = WorkTask(
                     title = title,
@@ -897,17 +1095,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     jobTag = activeProject,
                     dueTimestamp = due,
                     priority = if (priority in listOf("ALTA", "MEDIA", "BAJA")) priority else "MEDIA",
+                    taskType = if (TaskTypes.isValid(typeRaw)) typeRaw else TaskTypes.TAREA,
+                    confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.ALTA,
                     originReference = "Asistente Conversacional"
                 )
                 val id = db.taskDao().insertTask(task)
-                ragEngine.indexContent(id, "TASK", title, activeProject, "Tarea: $title para $activeProject")
-                val dateFmt = SimpleDateFormat("EEEE d 'de' MMMM, HH:mm", Locale("es", "ES")).format(Date(due))
-                "\n\n✅ *[Acción ejecutada: Tarea \"$title\" creada y agendada en $activeProject para el $dateFmt]*"
+                ragEngine.indexContent(
+                    id, "TASK", title, activeProject,
+                    "Tarea: $title. Tipo: ${TaskTypes.labelOf(task.taskType)}. Proyecto: $activeProject."
+                )
+                "\n\n✅ *[Acción ejecutada: ${TaskTypes.labelOf(task.taskType)} \"$title\" agendada en $activeProject para ${formatDueForHumans(due)}]*" +
+                    (if (due <= 0L) " *Sin fecha: pendiente de día y hora.*" else "")
             }
             "RESCHEDULE_TASK" -> {
+                // ---ACTION:RESCHEDULE_TASK|titulo|fechaTexto---
                 val parts = payload.split("|")
                 val titleKeyword = parts.getOrNull(0)?.trim()?.lowercase(Locale.getDefault()).orEmpty()
-                val due = resolveActionDueTimestamp(parts.getOrNull(3), parts.getOrNull(2))
+                val due = resolveDateTextToTimestamp(parts.getOrNull(1))
                 val projectTasks = db.taskDao().getTasksByJobSync(activeProject)
                 val target = projectTasks.firstOrNull {
                     titleKeyword.isNotBlank() && it.title.lowercase(Locale.getDefault()).contains(titleKeyword)
@@ -916,8 +1120,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (target != null) {
                     db.taskDao().updateTaskDue(target.id, due)
-                    val dateFmt = SimpleDateFormat("EEEE d 'de' MMMM, HH:mm", Locale("es", "ES")).format(Date(due))
-                    "\n\n✅ *[Acción ejecutada: Tarea \"${target.title}\" re-agendada al $dateFmt en $activeProject]*"
+                    "\n\n✅ *[Acción ejecutada: Tarea \"${target.title}\" re-agendada: ${formatDueForHumans(due)} en $activeProject]*"
                 } else {
                     ""
                 }
@@ -1081,47 +1284,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lower.contains("agendame") || lower.contains("necesito tener lista"))
 
         if (isCreateTaskIntent && activeProject != "Todos") {
-            var rawTitle = inputText
-                .replace(Regex("^(?:por\\s+favor\\s+)?(?:crea(?:r)?|agrega(?:r)?|anota(?:r)?|guarda(?:r)?|agenda(?:r)?|recuérdame|recuerdame|necesito\\s+tener\\s+lista)\\s+(?:una\\s+|la\\s+|esta\\s+)?(?:tarea|recordatorio|pendiente)?\\s*(?:de|que|para)?\\s*", RegexOption.IGNORE_CASE), "")
-                .trim().trimEnd('.', '!', '?')
+            // SUB-AGENTE EXTRACTOR: título técnico no literal + tipo + prioridad + fecha + confianza
+            val history = recentHistoryText()
+            val extracted = try {
+                extractTaskDetailsViaLLM(inputText, activeProject, history)
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "extractTaskDetails error: ${t.message}", t)
+                null
+            } ?: naiveTaskExtraction(inputText, activeProject)
 
-            if (rawTitle.isBlank()) rawTitle = "Tarea pendiente"
-
-            val now = System.currentTimeMillis()
-            // Fecha SIEMPRE futura: parsea días de la semana ("viernes"), "mañana", "en N días", fechas exactas...
-            val dueTimestamp = SpanishDateParser.resolveDueTimestamp(lower, now) ?: (now + 86400 * 1000L * 2)
-
-            val priority = if (lower.contains("urgente") || lower.contains("alta") || lower.contains("inmediato")) "ALTA"
-                           else if (lower.contains("baja")) "BAJA" else "MEDIA"
-
-            val cleanTitle = rawTitle.replaceFirstChar { it.uppercase() }
             val task = WorkTask(
-                title = cleanTitle,
-                description = "Anotada mediante dictado al asistente de voz",
+                title = extracted.title,
+                description = extracted.description,
                 jobTag = activeProject,
-                dueTimestamp = dueTimestamp,
-                priority = priority,
-                originReference = "Asistente ($activeProject)"
+                dueTimestamp = extracted.dueTimestamp,
+                priority = extracted.priority,
+                taskType = extracted.taskType,
+                confidence = extracted.confidence,
+                originReference = "Asistente ($activeProject)" + if (extracted.viaLLM) "" else " (sin LLM)"
             )
             val taskId = db.taskDao().insertTask(task)
             ragEngine.indexContent(
                 sourceId = taskId,
                 sourceType = "TASK",
-                title = cleanTitle,
+                title = extracted.title,
                 jobTag = activeProject,
-                content = "Tarea: $cleanTitle. Prioridad: $priority. Proyecto: $activeProject."
+                content = "Tarea: ${extracted.title}. Tipo: ${TaskTypes.labelOf(extracted.taskType)}. Prioridad: ${extracted.priority}. Proyecto: $activeProject."
             )
-            val dateFmt = SimpleDateFormat("dd 'de' MMMM, HH:mm", Locale("es", "ES")).format(Date(dueTimestamp))
-            ReminderNotificationHelper.showTaskReminder(
-                getApplication(),
-                taskId.toInt(),
-                cleanTitle,
-                "Programada para $dateFmt ($priority)",
-                activeProject,
-                "Recordatorio Proactivo"
-            )
+            if (extracted.dueTimestamp > System.currentTimeMillis()) {
+                ReminderNotificationHelper.showTaskReminder(
+                    getApplication(),
+                    taskId.toInt(),
+                    extracted.title,
+                    "Programada para ${formatDueForHumans(extracted.dueTimestamp)} (${extracted.priority})",
+                    activeProject,
+                    "Recordatorio Proactivo"
+                )
+            }
 
-            return "✅ **Tarea Agendada en $activeProject:**\n• **Título:** $cleanTitle\n• **Prioridad:** $priority\n• **Vencimiento:** $dateFmt\n\nGuardada en tu agenda y vectorizada en memoria RAG."
+            val typeLabel = TaskTypes.labelOf(extracted.taskType)
+            val confLabel = when (extracted.confidence) { "BAJA" -> "Baja"; "MEDIA" -> "Media"; else -> "Alta" }
+            return "✅ **$typeLabel Agendada en $activeProject:**\n" +
+                "• **Título:** ${extracted.title}\n" +
+                "• **Tipo:** $typeLabel\n" +
+                "• **Prioridad:** ${extracted.priority}\n" +
+                "• **Vencimiento:** ${formatDueForHumans(extracted.dueTimestamp)}\n" +
+                "• **Confianza:** $confLabel" +
+                (if (extracted.dueTimestamp <= 0L) "\n\n📌 No se especificó día ni hora: aparece en tus tareas pendientes pero no en el calendario. Dime la fecha y la re-agendo." else "") +
+                "\n\nGuardada en tu agenda y vectorizada en memoria RAG."
         }
 
         // 4. Guardar información / Nota / Directriz / Acuerdo en RAG

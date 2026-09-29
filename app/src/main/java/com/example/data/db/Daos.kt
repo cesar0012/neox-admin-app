@@ -91,6 +91,9 @@ interface MeetingDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMeeting(meeting: MeetingNote): Long
 
+    @Update
+    suspend fun updateMeeting(meeting: MeetingNote)
+
     @Delete
     suspend fun deleteMeeting(meeting: MeetingNote)
 }

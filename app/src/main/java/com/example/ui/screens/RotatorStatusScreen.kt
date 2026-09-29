@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Cached
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Speed
@@ -32,12 +33,14 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,6 +53,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -70,8 +74,6 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
     val status by viewModel.rotatorStatus.collectAsStateWithLifecycle()
     val isBenchmarking by viewModel.benchmarkingActive.collectAsStateWithLifecycle()
 
-    var openRouterKey by remember { mutableStateOf(viewModel.rotator.config.openRouterApiKey) }
-    var nvidiaKey by remember { mutableStateOf(viewModel.rotator.config.nvidiaApiKey) }
     var primaryProvider by remember { mutableStateOf(viewModel.rotator.config.primaryProvider) }
     var fallbackProvider by remember { mutableStateOf(viewModel.rotator.config.fallbackProvider) }
     var localhostEnabled by remember { mutableStateOf(viewModel.rotator.config.localhostEnabled) }
@@ -223,37 +225,103 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
                         }
                     }
 
-                    OutlinedTextField(
-                        value = nvidiaKey,
-                        onValueChange = {
-                            nvidiaKey = it
-                            viewModel.rotator.updateConfig(nvidiaKey = it)
-                        },
-                        label = { Text("NVIDIA NIM API Key (nvapi-...)", color = Slate400, fontSize = 12.sp) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = CyanNeon,
-                            unfocusedBorderColor = Slate700
-                        )
-                    )
+                    // API keys enmascaradas: nunca quedan visibles una vez guardadas
+                    var editingNvidiaKey by remember { mutableStateOf(viewModel.rotator.config.nvidiaApiKey.isBlank()) }
+                    var nvidiaKeyInput by remember { mutableStateOf("") }
 
-                    OutlinedTextField(
-                        value = openRouterKey,
-                        onValueChange = {
-                            openRouterKey = it
-                            viewModel.rotator.updateConfig(openRouterKey = it)
-                        },
-                        label = { Text("OpenRouter API Key (Opcional)", color = Slate400, fontSize = 12.sp) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = CyanNeon,
-                            unfocusedBorderColor = Slate700
+                    if (!editingNvidiaKey) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Slate800)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "NVIDIA NIM: ••••••••" + viewModel.rotator.config.nvidiaApiKey.takeLast(4),
+                                color = EmeraldSuccess,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            TextButton(onClick = { editingNvidiaKey = true; nvidiaKeyInput = "" }) {
+                                Text("Cambiar", color = CyanNeon, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = nvidiaKeyInput,
+                            onValueChange = {
+                                nvidiaKeyInput = it
+                                if (it.isNotBlank()) viewModel.rotator.updateConfig(nvidiaKey = it.trim())
+                            },
+                            label = { Text("NVIDIA NIM API Key (nvapi-...)", color = Slate400, fontSize = 12.sp) },
+                            placeholder = { Text("Pega tu nueva clave aquí", color = Slate700, fontSize = 12.sp) },
+                            visualTransformation = PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { editingNvidiaKey = false }) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = "Listo", tint = EmeraldSuccess, modifier = Modifier.size(18.dp))
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = CyanNeon,
+                                unfocusedBorderColor = Slate700
+                            )
                         )
-                    )
+                    }
+
+                    var editingOpenRouterKey by remember { mutableStateOf(viewModel.rotator.config.openRouterApiKey.isBlank()) }
+                    var openRouterKeyInput by remember { mutableStateOf("") }
+
+                    if (!editingOpenRouterKey) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Slate800)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (viewModel.rotator.config.openRouterApiKey.isBlank()) "OpenRouter: sin clave configurada"
+                                else "OpenRouter: ••••••••" + viewModel.rotator.config.openRouterApiKey.takeLast(4),
+                                color = if (viewModel.rotator.config.openRouterApiKey.isBlank()) Slate400 else EmeraldSuccess,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            TextButton(onClick = { editingOpenRouterKey = true; openRouterKeyInput = "" }) {
+                                Text("Cambiar", color = CyanNeon, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = openRouterKeyInput,
+                            onValueChange = {
+                                openRouterKeyInput = it
+                                if (it.isNotBlank()) viewModel.rotator.updateConfig(openRouterKey = it.trim())
+                            },
+                            label = { Text("OpenRouter API Key (Opcional)", color = Slate400, fontSize = 12.sp) },
+                            placeholder = { Text("Pega tu nueva clave aquí", color = Slate700, fontSize = 12.sp) },
+                            visualTransformation = PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { editingOpenRouterKey = false }) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = "Listo", tint = EmeraldSuccess, modifier = Modifier.size(18.dp))
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = CyanNeon,
+                                unfocusedBorderColor = Slate700
+                            )
+                        )
+                    }
 
                     // Localhost toggle
                     Row(

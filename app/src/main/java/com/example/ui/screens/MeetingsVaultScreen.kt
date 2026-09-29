@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Layers
@@ -48,6 +49,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -56,6 +58,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -118,6 +121,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
 
     var liveTranscriptText by remember { mutableStateOf("") }
     var isLiveRecordingActive by remember { mutableStateOf(false) }
+    var meetingToEdit by remember { mutableStateOf<MeetingNote?>(null) }
 
     // Speech recognition launcher
     val speechLauncher = rememberLauncherForActivityResult(
@@ -482,7 +486,8 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                             items(filteredMeetings, key = { it.id }) { meeting ->
                                 MeetingCard(
                                     meeting = meeting,
-                                    onToggleConcluded = { viewModel.toggleMeetingConcluded(meeting) }
+                                    onToggleConcluded = { viewModel.toggleMeetingConcluded(meeting) },
+                                    onEdit = { meetingToEdit = meeting }
                                 )
                             }
                         }
@@ -569,10 +574,99 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
             }
         }
     }
+    meetingToEdit?.let { meeting ->
+        EditMeetingDialog(
+            meeting = meeting,
+            jobList = jobs.map { it.name },
+            onDismiss = { meetingToEdit = null },
+            onSave = { newTitle, newJob ->
+                viewModel.updateMeetingDetails(meeting, newTitle, newJob)
+                meetingToEdit = null
+            }
+        )
+    }
 }
 
 @Composable
-fun MeetingCard(meeting: MeetingNote, onToggleConcluded: (() -> Unit)? = null) {
+private fun EditMeetingDialog(
+    meeting: MeetingNote,
+    jobList: List<String>,
+    onDismiss: () -> Unit,
+    onSave: (title: String, jobTag: String) -> Unit
+) {
+    var title by remember(meeting.id) { mutableStateOf(meeting.title) }
+    var selectedJob by remember(meeting.id) { mutableStateOf(meeting.jobTag) }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Slate900,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Edit, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp))
+                Text("Editar Junta", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Título de la junta", color = Slate400) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = CyanNeon,
+                        unfocusedBorderColor = Slate700
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (jobList.isNotEmpty()) {
+                    Text("Proyecto / Trabajo:", color = Slate400, fontSize = 12.sp)
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        modifier = Modifier.height(100.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(jobList) { job ->
+                            val isSelected = selectedJob == job
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) CyanNeon.copy(alpha = 0.18f) else Slate800)
+                                    .border(
+                                        1.dp,
+                                        if (isSelected) CyanNeon else Slate700,
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { selectedJob = job }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                            ) {
+                                Text(job, color = if (isSelected) CyanNeon else Slate400, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { if (title.isNotBlank()) onSave(title, selectedJob) },
+                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
+            ) {
+                Text("Guardar Cambios", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = Slate400)
+            }
+        }
+    )
+}
+
+@Composable
+fun MeetingCard(meeting: MeetingNote, onToggleConcluded: (() -> Unit)? = null, onEdit: (() -> Unit)? = null) {
     var isExpanded by remember { mutableStateOf(false) }
     val dateStr = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(meeting.dateTimestamp))
 
@@ -601,6 +695,11 @@ fun MeetingCard(meeting: MeetingNote, onToggleConcluded: (() -> Unit)? = null) {
             ) {
                 Text(meeting.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Spacer(modifier = Modifier.width(8.dp))
+                if (onEdit != null) {
+                    IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Editar junta", tint = Slate400, modifier = Modifier.size(15.dp))
+                    }
+                }
                 if (onToggleConcluded != null) {
                     Box(
                         modifier = Modifier

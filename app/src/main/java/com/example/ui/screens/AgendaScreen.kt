@@ -9,9 +9,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,11 +36,15 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Schedule
@@ -85,6 +91,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.MeetingNote
+import com.example.data.model.TaskTypes
 import com.example.data.model.WorkTask
 import com.example.ui.MainViewModel
 import com.example.ui.theme.AmberWarning
@@ -136,6 +143,7 @@ fun AgendaScreen(viewModel: MainViewModel) {
     var selectedStatusFilter by remember { mutableStateOf(StatusFilterType.ALL) }
 
     var showAddTaskDialog by remember { mutableStateOf(false) }
+    var taskToEdit by remember { mutableStateOf<WorkTask?>(null) }
 
     // Calendar selected date (start of day timestamp)
     var selectedCalendarTimestamp by remember { mutableStateOf(getStartOfDay(System.currentTimeMillis())) }
@@ -167,12 +175,12 @@ fun AgendaScreen(viewModel: MainViewModel) {
                     DateFilterType.TODAY -> task.dueTimestamp in getStartOfDay(now)..(getStartOfDay(now) + oneDayMs)
                     DateFilterType.NEXT_5_DAYS -> task.dueTimestamp in now..(now + 5 * oneDayMs)
                     DateFilterType.THIS_WEEK -> task.dueTimestamp in getStartOfDay(now)..(getStartOfDay(now) + 7 * oneDayMs)
-                    DateFilterType.OVERDUE -> task.dueTimestamp < now && !task.isCompleted
+                    DateFilterType.OVERDUE -> task.dueTimestamp in 1..now && !task.isCompleted // 0 = sin fecha, no es vencida
                 }
             } else if (activeViewTab == AgendaViewTab.CALENDAR) {
-                // Calendar view filters by exact day
+                // Calendar view filters by exact day (las tareas sin fecha nunca aparecen aquí)
                 val taskStartOfDay = getStartOfDay(task.dueTimestamp)
-                taskStartOfDay == selectedCalendarTimestamp
+                task.dueTimestamp > 0 && taskStartOfDay == selectedCalendarTimestamp
             } else {
                 true // Diagram view shows all matching status
             }
@@ -245,6 +253,7 @@ fun AgendaScreen(viewModel: MainViewModel) {
                             onToggleCompletion = { viewModel.toggleTaskCompletion(it) },
                             onUpdateStatus = { task, newStatus -> viewModel.updateTaskStatus(task, newStatus) },
                             onDeleteTask = { viewModel.deleteTask(it) },
+                            onEditTask = { taskToEdit = it },
                             onExportReport = { viewModel.exportDailyReport(context) }
                         )
                     }
@@ -257,7 +266,8 @@ fun AgendaScreen(viewModel: MainViewModel) {
                             dayFilteredTasks = filteredTasks,
                             onToggleCompletion = { viewModel.toggleTaskCompletion(it) },
                             onUpdateStatus = { task, newStatus -> viewModel.updateTaskStatus(task, newStatus) },
-                            onDeleteTask = { viewModel.deleteTask(it) }
+                            onDeleteTask = { viewModel.deleteTask(it) },
+                            onEditTask = { taskToEdit = it }
                         )
                     }
                     AgendaViewTab.DIAGRAM -> {
@@ -292,9 +302,21 @@ fun AgendaScreen(viewModel: MainViewModel) {
             jobList = jobs.map { it.name },
             initialJob = if (selectedFilter != "Todos") selectedFilter ?: "General" else "General",
             onDismiss = { showAddTaskDialog = false },
-            onSave = { title, desc, jobTag, dueTime, priority ->
-                viewModel.addTask(title, desc, jobTag, dueTime, priority)
+            onSave = { title, desc, jobTag, dueTime, priority, type ->
+                viewModel.addTask(title, desc, jobTag, dueTime, priority, taskType = type)
                 showAddTaskDialog = false
+            }
+        )
+    }
+
+    taskToEdit?.let { task ->
+        EditTaskDialog(
+            task = task,
+            jobList = jobs.map { it.name },
+            onDismiss = { taskToEdit = null },
+            onSave = { title, desc, type, priority, due, job ->
+                viewModel.updateTaskDetails(task, title, desc, type, priority, due, job)
+                taskToEdit = null
             }
         )
     }
@@ -324,8 +346,16 @@ fun AgendaListView(
     onToggleCompletion: (WorkTask) -> Unit,
     onUpdateStatus: (WorkTask, String) -> Unit,
     onDeleteTask: (WorkTask) -> Unit,
+    onEditTask: (WorkTask) -> Unit,
     onExportReport: () -> Unit
 ) {
+    // Orden: activas antes que completadas; con fecha asc (más próxima primero); sin fecha al final
+    val sortedTasks = remember(tasks) {
+        tasks.sortedWith(
+            compareBy({ it.isCompleted || it.status == "TERMINADO" }, { it.dueTimestamp <= 0 }, { it.dueTimestamp })
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 14.dp, bottom = 88.dp),
@@ -602,12 +632,13 @@ fun AgendaListView(
                 }
             }
         } else {
-            items(tasks, key = { it.id }) { task ->
+            items(sortedTasks, key = { it.id }) { task ->
                 TaskCard(
                     task = task,
                     onToggle = { onToggleCompletion(task) },
                     onUpdateStatus = { newStatus -> onUpdateStatus(task, newStatus) },
-                    onDelete = { onDeleteTask(task) }
+                    onDelete = { onDeleteTask(task) },
+                    onEdit = { onEditTask(task) }
                 )
             }
         }
@@ -627,7 +658,8 @@ fun AgendaCalendarView(
     dayFilteredTasks: List<WorkTask>,
     onToggleCompletion: (WorkTask) -> Unit,
     onUpdateStatus: (WorkTask, String) -> Unit,
-    onDeleteTask: (WorkTask) -> Unit
+    onDeleteTask: (WorkTask) -> Unit,
+    onEditTask: (WorkTask) -> Unit
 ) {
     var calendarYear by remember { mutableIntStateOf(Calendar.getInstance().get(Calendar.YEAR)) }
     var calendarMonth by remember { mutableIntStateOf(Calendar.getInstance().get(Calendar.MONTH)) } // 0-based
@@ -850,7 +882,8 @@ fun AgendaCalendarView(
                     task = task,
                     onToggle = { onToggleCompletion(task) },
                     onUpdateStatus = { newStatus -> onUpdateStatus(task, newStatus) },
-                    onDelete = { onDeleteTask(task) }
+                    onDelete = { onDeleteTask(task) },
+                    onEdit = { onEditTask(task) }
                 )
             }
         }
@@ -1669,26 +1702,80 @@ fun DiagramTaskCard(
 // REUSABLE COMPONENTS: TaskCard & Dialogs
 // -----------------------------------------------------------------------------------------
 
+private data class TypeVisual(val label: String, val icon: ImageVector, val color: Color)
+
+private fun typeVisualOf(type: String): TypeVisual = when (type) {
+    TaskTypes.JUNTA -> TypeVisual("Junta", Icons.Default.Groups, VioletAccent)
+    TaskTypes.LLAMADA -> TypeVisual("Llamada", Icons.Default.Phone, EmeraldSuccess)
+    TaskTypes.ENTREGA -> TypeVisual("Entrega", Icons.Default.Flag, RoseError)
+    TaskTypes.RECORDATORIO -> TypeVisual("Recordatorio", Icons.Default.NotificationsActive, AmberWarning)
+    else -> TypeVisual("Tarea", Icons.Default.CheckCircle, CyanNeon)
+}
+
+private fun confidenceVisual(level: String): Triple<String, Color, Int> = when (level) {
+    "BAJA" -> Triple("Baja", RoseError, 1)
+    "MEDIA" -> Triple("Media", AmberWarning, 2)
+    else -> Triple("Alta", EmeraldSuccess, 3)
+}
+
+@Composable
+private fun TypeBadge(taskType: String) {
+    val tv = typeVisualOf(taskType)
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(tv.color.copy(alpha = 0.18f))
+            .border(1.dp, tv.color.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        Icon(tv.icon, contentDescription = tv.label, tint = tv.color, modifier = Modifier.size(12.dp))
+        Text(tv.label, color = tv.color, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun ConfidenceIndicator(level: String) {
+    val (label, color, dots) = confidenceVisual(level)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            repeat(3) { i ->
+                Box(
+                    modifier = Modifier
+                        .size(5.dp)
+                        .clip(CircleShape)
+                        .background(if (i < dots) color else Slate700)
+                )
+            }
+        }
+        Text("Confianza $label", color = color, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
 @Composable
 fun TaskCard(
     task: WorkTask,
     onToggle: () -> Unit,
     onUpdateStatus: (String) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onEdit: () -> Unit = {}
 ) {
     val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-    val dateFormat = SimpleDateFormat("dd MMM", Locale.getDefault())
+    val dateFormat = SimpleDateFormat("EEE d MMM", Locale.getDefault())
     val priorityColor = when (task.priority) {
         "ALTA" -> RoseError
         "MEDIA" -> AmberWarning
         else -> CyanNeon
     }
+    val typeVisual = typeVisualOf(task.taskType)
+    val noDate = task.dueTimestamp <= 0L
 
     var showStatusDropdown by remember { mutableStateOf(false) }
 
     val now = System.currentTimeMillis()
-    val isOverdue = task.dueTimestamp < now && !task.isCompleted
-    val isDueToday = task.dueTimestamp in getStartOfDay(now)..(getStartOfDay(now) + 24 * 3600 * 1000L) && !task.isCompleted
+    val isOverdue = !noDate && task.dueTimestamp < now && !task.isCompleted
+    val isDueToday = !noDate && task.dueTimestamp in getStartOfDay(now)..(getStartOfDay(now) + 24 * 3600 * 1000L) && !task.isCompleted
 
     val currentStatusDisplay = when (task.status) {
         "EN_PROCESO" -> "En Proceso"
@@ -1704,159 +1791,178 @@ fun TaskCard(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = Slate900),
         border = CardDefaults.outlinedCardBorder().copy(
-            brush = androidx.compose.ui.graphics.SolidColor(if (isOverdue) RoseError.copy(alpha = 0.5f) else Slate800)
+            brush = androidx.compose.ui.graphics.SolidColor(
+                when {
+                    isOverdue -> RoseError.copy(alpha = 0.55f)
+                    task.taskType == TaskTypes.JUNTA -> typeVisual.color.copy(alpha = 0.45f)
+                    else -> Slate800
+                }
+            )
         )
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onToggle, modifier = Modifier.testTag("toggle_task_${task.id}")) {
-                Icon(
-                    imageVector = if (task.isCompleted || task.status == "TERMINADO") Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                    contentDescription = "Completar tarea",
-                    tint = if (task.isCompleted || task.status == "TERMINADO") EmeraldSuccess else Slate400,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
+        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            // Barra de acento lateral según tipo de actividad
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxHeight()
+                    .background(typeVisual.color.copy(alpha = 0.85f))
+            )
 
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Status Interactive Button with Dropdown
-                    Box {
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(statusColor.copy(alpha = 0.22f))
-                                .border(1.2.dp, statusColor, RoundedCornerShape(8.dp))
-                                .clickable { showStatusDropdown = true }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = when (task.status) {
-                                    "EN_PROCESO" -> Icons.Default.Autorenew
-                                    "TERMINADO" -> Icons.Default.CheckCircle
-                                    else -> Icons.Default.HourglassEmpty
-                                },
-                                contentDescription = null,
-                                tint = statusColor,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(currentStatusDisplay, color = statusColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = statusColor, modifier = Modifier.size(14.dp))
-                        }
-
-                        DropdownMenu(
-                            expanded = showStatusDropdown,
-                            onDismissRequest = { showStatusDropdown = false },
-                            modifier = Modifier.background(Slate800)
-                        ) {
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(Icons.Default.HourglassEmpty, contentDescription = null, tint = AmberWarning, modifier = Modifier.size(16.dp)) },
-                                text = { Text("Al Pendiente", color = AmberWarning, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
-                                onClick = {
-                                    onUpdateStatus("PENDIENTE")
-                                    showStatusDropdown = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(Icons.Default.Autorenew, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp)) },
-                                text = { Text("En Proceso", color = CyanNeon, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
-                                onClick = {
-                                    onUpdateStatus("EN_PROCESO")
-                                    showStatusDropdown = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                leadingIcon = { Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(16.dp)) },
-                                text = { Text("Concluida", color = EmeraldSuccess, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
-                                onClick = {
-                                    onUpdateStatus("TERMINADO")
-                                    showStatusDropdown = false
-                                }
-                            )
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(priorityColor.copy(alpha = 0.2f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(task.priority, color = priorityColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Slate800)
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(task.jobTag, color = CyanNeon, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = task.title,
-                    color = if (task.isCompleted || task.status == "TERMINADO") Slate400 else Color.White,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textDecoration = if (task.isCompleted || task.status == "TERMINADO") TextDecoration.LineThrough else TextDecoration.None
-                )
-
-                if (task.description.isNotBlank()) {
-                    Text(
-                        text = task.description,
-                        color = Slate400,
-                        fontSize = 12.sp,
-                        maxLines = 2
-                    )
-                }
-
-                if (task.originReference.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Ref: ${task.originReference}",
-                        color = Color(0xFF67E8F9),
-                        fontSize = 10.sp,
-                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 10.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onToggle, modifier = Modifier.testTag("toggle_task_${task.id}")) {
                     Icon(
-                        imageVector = Icons.Default.Schedule,
-                        contentDescription = null,
-                        tint = if (isOverdue) RoseError else if (isDueToday) AmberWarning else Slate400,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = if (isOverdue) "⚠️ Vencida: ${dateFormat.format(Date(task.dueTimestamp))} ${timeFormat.format(Date(task.dueTimestamp))}"
-                        else if (isDueToday) "🚨 Vence hoy a las ${timeFormat.format(Date(task.dueTimestamp))}"
-                        else "${dateFormat.format(Date(task.dueTimestamp))} a las ${timeFormat.format(Date(task.dueTimestamp))}",
-                        color = if (isOverdue) RoseError else if (isDueToday) AmberWarning else Slate400,
-                        fontSize = 11.sp,
-                        fontWeight = if (isOverdue || isDueToday) FontWeight.Bold else FontWeight.Normal
+                        imageVector = if (task.isCompleted || task.status == "TERMINADO") Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                        contentDescription = "Completar tarea",
+                        tint = if (task.isCompleted || task.status == "TERMINADO") EmeraldSuccess else Slate400,
+                        modifier = Modifier.size(24.dp)
                     )
                 }
-            }
 
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "Eliminar tarea", tint = Slate700, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    // Fila 1: Tipo + estado + prioridad
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        TypeBadge(task.taskType)
+
+                        Box {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(statusColor.copy(alpha = 0.18f))
+                                    .clickable { showStatusDropdown = true }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Text(currentStatusDisplay, color = statusColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = statusColor, modifier = Modifier.size(12.dp))
+                            }
+
+                            DropdownMenu(
+                                expanded = showStatusDropdown,
+                                onDismissRequest = { showStatusDropdown = false },
+                                modifier = Modifier.background(Slate800)
+                            ) {
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(Icons.Default.HourglassEmpty, contentDescription = null, tint = AmberWarning, modifier = Modifier.size(16.dp)) },
+                                    text = { Text("Al Pendiente", color = AmberWarning, fontSize = 12.sp) },
+                                    onClick = { onUpdateStatus("PENDIENTE"); showStatusDropdown = false }
+                                )
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(Icons.Default.Autorenew, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp)) },
+                                    text = { Text("En Proceso", color = CyanNeon, fontSize = 12.sp) },
+                                    onClick = { onUpdateStatus("EN_PROCESO"); showStatusDropdown = false }
+                                )
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(16.dp)) },
+                                    text = { Text("Concluida", color = EmeraldSuccess, fontSize = 12.sp) },
+                                    onClick = { onUpdateStatus("TERMINADO"); showStatusDropdown = false }
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(priorityColor.copy(alpha = 0.2f))
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
+                            Text(task.priority, color = priorityColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(5.dp))
+
+                    Text(
+                        text = task.title,
+                        color = if (task.isCompleted || task.status == "TERMINADO") Slate400 else Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textDecoration = if (task.isCompleted || task.status == "TERMINADO") TextDecoration.LineThrough else TextDecoration.None
+                    )
+
+                    if (task.description.isNotBlank()) {
+                        Text(
+                            text = task.description,
+                            color = Slate400,
+                            fontSize = 11.sp,
+                            maxLines = 2
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(5.dp))
+
+                    // Fecha (o falta de fecha) + confianza
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = when {
+                                    noDate -> Slate400
+                                    isOverdue -> RoseError
+                                    isDueToday -> AmberWarning
+                                    else -> Slate400
+                                },
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                text = when {
+                                    noDate -> "Sin día ni hora especificados"
+                                    isOverdue -> "Vencida: ${dateFormat.format(Date(task.dueTimestamp))} ${timeFormat.format(Date(task.dueTimestamp))}"
+                                    isDueToday -> "Vence hoy a las ${timeFormat.format(Date(task.dueTimestamp))}"
+                                    else -> "${dateFormat.format(Date(task.dueTimestamp))} · ${timeFormat.format(Date(task.dueTimestamp))}"
+                                },
+                                color = when {
+                                    noDate -> Slate400
+                                    isOverdue -> RoseError
+                                    isDueToday -> AmberWarning
+                                    else -> Slate400
+                                },
+                                fontSize = 10.sp,
+                                fontWeight = if (isOverdue || isDueToday) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+
+                        ConfidenceIndicator(task.confidence)
+                    }
+
+                    if (task.jobTag.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = task.jobTag,
+                            color = CyanNeon.copy(alpha = 0.8f),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    IconButton(onClick = onEdit, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Editar tarea", tint = Slate400, modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.Default.Delete, contentDescription = "Eliminar tarea", tint = Slate700, modifier = Modifier.size(16.dp))
+                    }
+                }
             }
         }
     }
@@ -1892,15 +1998,25 @@ fun AddTaskDialog(
     jobList: List<String>,
     initialJob: String,
     onDismiss: () -> Unit,
-    onSave: (title: String, desc: String, jobTag: String, dueTime: Long, priority: String) -> Unit
+    onSave: (title: String, desc: String, jobTag: String, dueTime: Long, priority: String, taskType: String) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var selectedJob by remember { mutableStateOf(initialJob) }
     var selectedPriority by remember { mutableStateOf("MEDIA") }
+    var selectedType by remember { mutableStateOf(TaskTypes.TAREA) }
 
-    val calendar = remember { Calendar.getInstance() }
-    var dueTimestamp by remember { mutableStateOf(calendar.timeInMillis + 3600 * 1000L * 2) }
+    val now = remember { System.currentTimeMillis() }
+    val dueOptions = remember {
+        listOf(
+            "Hoy" to (now + 2 * 3600_000L),
+            "Mañana" to (now + 86400_000L),
+            "En 1 semana" to (now + 7 * 86400_000L),
+            "Sin fecha" to 0L
+        )
+    }
+    var selectedDueLabel by remember { mutableStateOf("Mañana") }
+    val dueTimestamp = dueOptions.firstOrNull { it.first == selectedDueLabel }?.second ?: (now + 86400_000L)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1937,6 +2053,29 @@ fun AddTaskDialog(
                     maxLines = 3
                 )
 
+                Text("Tipo de actividad:", color = Slate400, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TaskTypes.ALL.forEach { type ->
+                        val tv = typeVisualOf(type)
+                        FilterChip(
+                            label = tv.label,
+                            isSelected = selectedType == type,
+                            onClick = { selectedType = type }
+                        )
+                    }
+                }
+
+                Text("Fecha:", color = Slate400, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    dueOptions.forEach { (label, _) ->
+                        FilterChip(
+                            label = label,
+                            isSelected = selectedDueLabel == label,
+                            onClick = { selectedDueLabel = label }
+                        )
+                    }
+                }
+
                 Text("Proyecto / Trabajo:", color = Slate400, fontSize = 12.sp)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     val displayJobs = if (jobList.isEmpty()) listOf("General", "Trabajo 1", "Freelance") else jobList
@@ -1965,13 +2104,144 @@ fun AddTaskDialog(
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onSave(title, description, selectedJob, dueTimestamp, selectedPriority)
+                        onSave(title, description, selectedJob, dueTimestamp, selectedPriority, selectedType)
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
                 modifier = Modifier.testTag("save_task_btn")
             ) {
                 Text("Guardar Tarea", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = Slate400)
+            }
+        }
+    )
+}
+
+@Composable
+fun EditTaskDialog(
+    task: WorkTask,
+    jobList: List<String>,
+    onDismiss: () -> Unit,
+    onSave: (title: String, desc: String, type: String, priority: String, due: Long, jobTag: String) -> Unit
+) {
+    var title by remember(task.id) { mutableStateOf(task.title) }
+    var description by remember(task.id) { mutableStateOf(task.description) }
+    var selectedType by remember(task.id) { mutableStateOf(if (TaskTypes.isValid(task.taskType)) task.taskType else TaskTypes.TAREA) }
+    var selectedPriority by remember(task.id) { mutableStateOf(task.priority) }
+    var selectedJob by remember(task.id) { mutableStateOf(task.jobTag) }
+
+    val now = remember { System.currentTimeMillis() }
+    val dueOptions = remember(task.id) {
+        buildList {
+            add("Mantener fecha" to task.dueTimestamp)
+            add("Hoy" to (now + 2 * 3600_000L))
+            add("Mañana" to (now + 86400_000L))
+            add("En 1 semana" to (now + 7 * 86400_000L))
+            add("Sin fecha" to 0L)
+        }
+    }
+    var selectedDueLabel by remember(task.id) { mutableStateOf("Mantener fecha") }
+    val dueTimestamp = dueOptions.firstOrNull { it.first == selectedDueLabel }?.second ?: task.dueTimestamp
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Slate900,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Edit, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp))
+                Text("Editar ${TaskTypes.labelOf(selectedType)}", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Título", color = Slate400) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = CyanNeon,
+                        unfocusedBorderColor = Slate700
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Descripción", color = Slate400) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = CyanNeon,
+                        unfocusedBorderColor = Slate700
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 3
+                )
+
+                Text("Tipo de actividad:", color = Slate400, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TaskTypes.ALL.forEach { type ->
+                        FilterChip(
+                            label = TaskTypes.labelOf(type),
+                            isSelected = selectedType == type,
+                            onClick = { selectedType = type }
+                        )
+                    }
+                }
+
+                Text("Prioridad:", color = Slate400, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("ALTA", "MEDIA", "BAJA").forEach { prio ->
+                        FilterChip(
+                            label = prio,
+                            isSelected = selectedPriority == prio,
+                            onClick = { selectedPriority = prio }
+                        )
+                    }
+                }
+
+                Text("Fecha:", color = Slate400, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    dueOptions.forEach { (label, _) ->
+                        FilterChip(
+                            label = label,
+                            isSelected = selectedDueLabel == label,
+                            onClick = { selectedDueLabel = label }
+                        )
+                    }
+                }
+
+                if (jobList.isNotEmpty()) {
+                    Text("Proyecto / Trabajo:", color = Slate400, fontSize = 12.sp)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(jobList) { job ->
+                            FilterChip(
+                                label = job,
+                                isSelected = selectedJob == job,
+                                onClick = { selectedJob = job }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (title.isNotBlank()) {
+                        onSave(title, description, selectedType, selectedPriority, dueTimestamp, selectedJob)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
+            ) {
+                Text("Guardar Cambios", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
