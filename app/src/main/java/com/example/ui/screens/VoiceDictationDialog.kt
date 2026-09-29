@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -23,7 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Mic
@@ -64,6 +64,126 @@ import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 
 /**
+ * Controlador de reconocimiento continuo.
+ *
+ * Estrategia anti-cortes: cada segmento de dictado corre en una instancia NUEVA de
+ * SpeechRecognizer. Al terminar (resultados) o fallar (timeout, NO_MATCH, ERROR_CLIENT,
+ * RECOGNIZER_BUSY...) se destruye la instancia y se crea otra tras un pequeño backoff.
+ * Así la sesión de dictado nunca muere: el usuario puede pausar todo lo que quiera
+ * y solo se envía con el botón Enviar.
+ */
+private class DictationController(private val context: Context, private val handler: Handler) {
+
+    var wantsListening = false
+    var onListeningChange: ((Boolean) -> Unit)? = null
+    var onPartial: ((String) -> Unit)? = null
+    var onFinal: ((String) -> Unit)? = null
+    var onUnavailable: (() -> Unit)? = null
+
+    private var recognizer: SpeechRecognizer? = null
+    private var backoffSteps = 0 // evita bucles agresivos cuando hay silencio prolongado
+
+    private val listener = object : RecognitionListener {
+        override fun onReadyForSpeech(params: Bundle?) { onListeningChange?.invoke(true) }
+        override fun onBeginningOfSpeech() { backoffSteps = 0; onListeningChange?.invoke(true) }
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onEndOfSpeech() { onListeningChange?.invoke(false) }
+
+        override fun onError(error: Int) {
+            onListeningChange?.invoke(false)
+            if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) return
+            // Cualquier otro error (timeout por pausa, NO_MATCH, CLIENT, BUSY...) reinicia sesión
+            scheduleRestart()
+        }
+
+        override fun onResults(results: Bundle?) {
+            onListeningChange?.invoke(false)
+            val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            val text = list?.firstOrNull()?.trim().orEmpty()
+            if (text.isNotEmpty()) onFinal?.invoke(text)
+            scheduleRestart(shortDelay = true)
+        }
+
+        override fun onPartialResults(partialResults: Bundle?) {
+            val list = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            if (!list.isNullOrEmpty() && list[0].isNotBlank()) {
+                backoffSteps = 0
+                onPartial?.invoke(list[0].trim())
+            }
+        }
+
+        override fun onEvent(eventType: Int, params: Bundle?) {}
+    }
+
+    fun start() {
+        wantsListening = true
+        handler.removeCallbacksAndMessages(null)
+        startSessionNow()
+    }
+
+    fun pause() {
+        wantsListening = false
+        handler.removeCallbacksAndMessages(null)
+        destroySession()
+    }
+
+    fun destroy() {
+        wantsListening = false
+        handler.removeCallbacksAndMessages(null)
+        destroySession()
+    }
+
+    private fun scheduleRestart(shortDelay: Boolean = false) {
+        handler.removeCallbacksAndMessages(null)
+        if (!wantsListening) return
+        val base = if (shortDelay) 250L else 450L
+        val delay = base + backoffSteps * 400L
+        backoffSteps = (backoffSteps + 1).coerceAtMost(6)
+        handler.postDelayed({ startSessionNow() }, delay)
+    }
+
+    private fun startSessionNow() {
+        if (!wantsListening) return
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            wantsListening = false
+            onUnavailable?.invoke()
+            return
+        }
+        destroySession()
+        try {
+            val r = SpeechRecognizer.createSpeechRecognizer(context)
+            recognizer = r
+            r.setRecognitionListener(listener)
+            r.startListening(listenIntent())
+        } catch (t: Throwable) {
+            handler.postDelayed({ if (wantsListening) startSessionNow() }, 900L)
+        }
+    }
+
+    private fun destroySession() {
+        recognizer?.let { r ->
+            try { r.cancel() } catch (_: Exception) {}
+            try { r.destroy() } catch (_: Exception) {}
+        }
+        recognizer = null
+        onListeningChange?.invoke(false)
+    }
+
+    private fun listenIntent(): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        // Extras reconocidos por los motores (no API pública) para tolerar silencios largos
+        putExtra("android.speech.extra.DICTATION_MODE", true)
+        putExtra("android.speech.extras.SPEECH_INPUT_COMPLETE_SILENCE_DURATION_MILLIS", 10000)
+        putExtra("android.speech.extras.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_DURATION_MILLIS", 10000)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3000)
+    }
+}
+
+/**
  * Dictado por voz con sesión persistente: NO se cierra solo por pausas,
  * acumula todo lo hablado y solo se envía cuando el usuario presiona "Enviar".
  */
@@ -88,81 +208,42 @@ fun VoiceDictationDialog(
         hasPermission = granted
     }
 
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
-
-    fun startListeningSafe(recognizer: SpeechRecognizer) {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            // Tolerancia máxima a silencios (extras reconocidos por el motor de Google aunque no sean API pública)
-            putExtra("android.speech.extras.SPEECH_INPUT_COMPLETE_SILENCE_DURATION_MILLIS", 10000)
-            putExtra("android.speech.extras.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_DURATION_MILLIS", 10000)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3000)
-        }
-        try {
-            recognizer.startListening(intent)
-        } catch (t: Throwable) {
-            isListening = false
-        }
-    }
-
     LaunchedEffect(Unit) {
         if (!hasPermission) permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    DisposableEffect(hasPermission) {
-        var recognizer: SpeechRecognizer? = null
+    val controller = remember {
+        DictationController(context.applicationContext, Handler(Looper.getMainLooper()))
+    }
+
+    DisposableEffect(controller, hasPermission) {
         if (hasPermission) {
-            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-                engineAvailable = false
-            } else {
-                recognizer = SpeechRecognizer.createSpeechRecognizer(context)
-                recognizer.setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) { isListening = true }
-                    override fun onBeginningOfSpeech() { isListening = true }
-                    override fun onRmsChanged(rmsdB: Float) {}
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-                    override fun onEndOfSpeech() { isListening = false }
-
-                    override fun onError(error: Int) {
-                        isListening = false
-                        val fatal = error == SpeechRecognizer.ERROR_CLIENT ||
-                            error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
-                        // Reinicio automático: la sesión JAMÁS se cierra por pausas o timeouts
-                        if (wantsListening && !fatal) {
-                            val r = recognizer ?: return
-                            mainHandler.postDelayed({ if (wantsListening) startListeningSafe(r) }, 300)
-                        }
-                    }
-
-                    override fun onResults(results: Bundle?) {
-                        isListening = false
-                        val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        if (!list.isNullOrEmpty() && list[0].isNotBlank()) {
-                            finalizedText = if (finalizedText.isBlank()) list[0].trim() else (finalizedText + " " + list[0].trim())
-                            partialText = ""
-                        }
-                        if (wantsListening) {
-                            val r = recognizer ?: return
-                            mainHandler.postDelayed({ if (wantsListening) startListeningSafe(r) }, 250)
-                        }
-                    }
-
-                    override fun onPartialResults(partialResults: Bundle?) {
-                        val list = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        if (!list.isNullOrEmpty()) partialText = list[0]
-                    }
-
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
-                startListeningSafe(recognizer)
+            controller.onListeningChange = { listening -> isListening = listening }
+            controller.onPartial = { p -> partialText = p }
+            controller.onFinal = { f ->
+                finalizedText = if (finalizedText.isBlank()) f else (finalizedText + " " + f)
+                partialText = ""
             }
+            controller.onUnavailable = { engineAvailable = false }
+            controller.start()
         }
         onDispose {
+            controller.destroy()
+            controller.onListeningChange = null
+            controller.onPartial = null
+            controller.onFinal = null
+            controller.onUnavailable = null
+        }
+    }
+
+    fun togglePauseResume() {
+        if (wantsListening) {
             wantsListening = false
-            mainHandler.removeCallbacksAndMessages(null)
-            recognizer?.destroy()
+            controller.pause()
+        } else {
+            wantsListening = true
+            partialText = ""
+            controller.start()
         }
     }
 
@@ -191,7 +272,13 @@ fun VoiceDictationDialog(
                 }
                 Column {
                     Text(
-                        text = if (!engineAvailable) "Dictado no disponible" else if (isListening) "Escuchando..." else "En pausa de micrófono",
+                        text = when {
+                            !engineAvailable -> "Dictado no disponible"
+                            !hasPermission -> "Permiso de micrófono"
+                            isListening -> "Escuchando..."
+                            wantsListening -> "Reconectando micrófono..."
+                            else -> "Micrófono en pausa"
+                        },
                         color = if (isListening) CyanNeon else Color.White,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
@@ -209,7 +296,7 @@ fun VoiceDictationDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (!hasPermission) {
                     Text(
-                        "Se necesita permiso de micrófono para el dictado. Toca Cancelar y vuelve a abrir el micrófono para concederlo.",
+                        "Se necesita permiso de micrófono para el dictado. Cancela, vuelve a abrir el micrófono y concede el permiso.",
                         color = AmberWarning,
                         fontSize = 12.sp
                     )
@@ -232,8 +319,7 @@ fun VoiceDictationDialog(
                         unfocusedBorderColor = Slate700,
                         focusedContainerColor = Slate800,
                         unfocusedContainerColor = Slate800
-                    ),
-                    keyboardOptions = KeyboardOptions.Default
+                    )
                 )
 
                 Row(
@@ -242,9 +328,7 @@ fun VoiceDictationDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        IconButton(onClick = {
-                            wantsListening = !wantsListening
-                        }) {
+                        IconButton(onClick = { togglePauseResume() }) {
                             Icon(
                                 if (wantsListening) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 contentDescription = if (wantsListening) "Pausar micrófono" else "Reanudar micrófono",
@@ -265,7 +349,11 @@ fun VoiceDictationDialog(
                         }
                     }
                     Text(
-                        text = if (wantsListening) "Micrófono activo" else "Micrófono pausado",
+                        text = when {
+                            !wantsListening -> "Micrófono pausado"
+                            isListening -> "Escuchando · habla con libertad"
+                            else -> "Preparando escucha..."
+                        },
                         color = if (wantsListening) CyanNeon else AmberWarning,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
@@ -277,6 +365,7 @@ fun VoiceDictationDialog(
             Button(
                 onClick = {
                     wantsListening = false
+                    controller.pause()
                     val toSend = finalizedText.ifBlank { partialText }
                     onSend(SpeechContextPolisher.polishDictation(toSend))
                 },
@@ -291,6 +380,7 @@ fun VoiceDictationDialog(
         dismissButton = {
             TextButton(onClick = {
                 wantsListening = false
+                controller.pause()
                 onDismiss()
             }) {
                 Text("Cancelar", color = Slate400)
