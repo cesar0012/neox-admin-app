@@ -6,6 +6,8 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import com.example.data.model.ChatMessageEntity
+import com.example.data.model.ConversationSession
 import com.example.data.model.DocumentItem
 import com.example.data.model.JobProject
 import com.example.data.model.MeetingNote
@@ -67,6 +69,9 @@ interface TaskDao {
 
     @Query("SELECT * FROM work_tasks ORDER BY dueTimestamp ASC")
     suspend fun getAllTasksSync(): List<WorkTask>
+
+    @Query("UPDATE work_tasks SET dueTimestamp = :dueTimestamp WHERE id = :id")
+    suspend fun updateTaskDue(id: Long, dueTimestamp: Long)
 
     @Query("DELETE FROM work_tasks WHERE id = :id")
     suspend fun deleteTaskById(id: Long)
@@ -145,6 +150,42 @@ interface VaultDao {
 
     @Delete
     suspend fun deleteVaultEntry(entry: VaultEntry)
+}
+
+@Dao
+interface ConversationDao {
+    @Query("SELECT * FROM conversation_sessions ORDER BY lastActiveAt DESC")
+    fun getAllSessions(): Flow<List<ConversationSession>>
+
+    @Query("SELECT * FROM conversation_sessions ORDER BY lastActiveAt DESC")
+    suspend fun getAllSessionsSync(): List<ConversationSession>
+
+    @Query("SELECT * FROM conversation_sessions WHERE id = :id")
+    suspend fun getSessionById(id: Long): ConversationSession?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSession(session: ConversationSession): Long
+
+    @Query("UPDATE conversation_sessions SET lastActiveAt = :timestamp WHERE id = :id")
+    suspend fun touchSession(id: Long, timestamp: Long)
+
+    @Query("UPDATE conversation_sessions SET title = :title WHERE id = :id")
+    suspend fun renameSession(id: Long, title: String)
+
+    @Query("DELETE FROM conversation_sessions WHERE id = :id")
+    suspend fun deleteSessionById(id: Long)
+}
+
+@Dao
+interface ChatMsgDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(message: ChatMessageEntity)
+
+    @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
+    suspend fun getMessagesSync(sessionId: Long): List<ChatMessageEntity>
+
+    @Query("DELETE FROM chat_messages WHERE sessionId = :sessionId")
+    suspend fun deleteForSession(sessionId: Long)
 }
 
 @Dao

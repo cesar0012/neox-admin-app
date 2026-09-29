@@ -35,4 +35,23 @@ class AppPreferences(context: Context) {
     fun setAdvanceNoticeMinutes(minutes: Int) {
         prefs.edit().putInt("advance_notice_min", minutes).apply()
     }
+
+    // --- Ajustes de voz (TTS) ---
+    fun getTtsRate(): Float = prefs.getFloat("tts_rate", 1.0f)
+
+    fun setTtsRate(rate: Float) {
+        prefs.edit().putFloat("tts_rate", rate.coerceIn(0.5f, 2.0f)).apply()
+    }
+
+    fun getTtsPitch(): Float = prefs.getFloat("tts_pitch", 1.0f)
+
+    fun setTtsPitch(pitch: Float) {
+        prefs.edit().putFloat("tts_pitch", pitch.coerceIn(0.5f, 2.0f)).apply()
+    }
+
+    fun getTtsVoiceName(): String = prefs.getString("tts_voice_name", "") ?: ""
+
+    fun setTtsVoiceName(name: String) {
+        prefs.edit().putString("tts_voice_name", name).apply()
+    }
 }

@@ -1,6 +1,7 @@
 package com.example.data.model
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "job_projects")
@@ -79,6 +80,27 @@ data class VaultEntry(
     val timestamp: Long = System.currentTimeMillis(),
     val retentionDays: Int = 10, // Default 10 days, configurable
     val isProcessed: Boolean = true
+)
+
+/** Sesión/conversación independiente del asistente (para separar temas o proyectos). */
+@Entity(tableName = "conversation_sessions")
+data class ConversationSession(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val jobTag: String = "General", // proyecto activo al momento de crearla
+    val createdAt: Long = System.currentTimeMillis(),
+    val lastActiveAt: Long = System.currentTimeMillis()
+)
+
+/** Mensaje de chat persistido, pertenece a una sesión. */
+@Entity(tableName = "chat_messages", indices = [Index("sessionId")])
+data class ChatMessageEntity(
+    @PrimaryKey val id: String,
+    val sessionId: Long,
+    val sender: String, // USER o ASSISTANT
+    val text: String,
+    val modelUsed: String? = null,
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "processing_queue")

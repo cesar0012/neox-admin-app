@@ -7,12 +7,15 @@ import android.speech.tts.TextToSpeech
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.AppDatabase
+import com.example.data.model.ChatMessageEntity
+import com.example.data.model.ConversationSession
 import com.example.data.model.DocumentItem
 import com.example.data.model.JobProject
 import com.example.data.model.MeetingNote
 import com.example.data.model.ProcessingQueueItem
 import com.example.data.model.VaultEntry
 import com.example.data.model.WorkTask
+import com.example.data.nlp.SpanishDateParser
 import com.example.data.notifications.ReminderNotificationHelper
 import com.example.data.preferences.AppPreferences
 import com.example.data.rag.RAGMemoryEngine
@@ -21,6 +24,7 @@ import com.example.data.rotator.LLMRotator
 import com.example.data.rotator.ModelLane
 import com.example.data.rotator.RotatorStatus
 import com.example.data.speech.SpeechContextPolisher
+import com.example.data.speech.TtsTextCleaner
 import com.example.data.webhook.ChromeExtensionExporter
 import com.example.data.webhook.IdeIntegrationExporter
 import com.example.data.webhook.LocalWebhookServer
@@ -106,6 +110,110 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isProcessingChat = MutableStateFlow(false)
     val isProcessingChat: StateFlow<Boolean> = _isProcessingChat.asStateFlow()
 
+    // --- Sesiones de conversación (temas/proyectos separados, persistidos) ---
+    private val _chatSessions = MutableStateFlow<List<ConversationSession>>(emptyList())
+    val chatSessions: StateFlow<List<ConversationSession>> = _chatSessions.asStateFlow()
+
+    private val _activeSessionId = MutableStateFlow<Long?>(null)
+    val activeSessionId: StateFlow<Long?> = _activeSessionId.asStateFlow()
+
+    companion object {
+        /** Cantidad de mensajes recientes inyectados en cada prompt (memoria secuencial barata). */
+        const val CHAT_HISTORY_WINDOW = 12
+        private const val CHAT_HISTORY_MAX_CHARS = 320
+    }
+
+    private fun defaultSessionTitle(): String =
+        "Conversación del " + SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date())
+
+    private fun greetingMessage(): ChatMessage = ChatMessage(
+        sender = "ASSISTANT",
+        text = "¡Hola! Soy tu asistente OmniWork. Estoy conectado a tu memoria RAG vectorial, tu bóveda segura y al rotador de modelos LLM gratuitos. ¿En qué trabajamos hoy?"
+    )
+
+    private suspend fun initChatSessions() {
+        try {
+            var sessions = db.conversationDao().getAllSessionsSync()
+            if (sessions.isEmpty()) {
+                val id = db.conversationDao().insertSession(
+                    ConversationSession(title = defaultSessionTitle(), jobTag = _assistantSelectedProject.value)
+                )
+                sessions = db.conversationDao().getAllSessionsSync()
+                if (sessions.none { it.id == id } && sessions.isEmpty()) {
+                    sessions = listOf(ConversationSession(id = id, title = defaultSessionTitle()))
+                }
+            }
+            _chatSessions.value = sessions
+            val active = sessions.firstOrNull() ?: return
+            _activeSessionId.value = active.id
+            loadSessionMessages(active.id)
+        } catch (t: Throwable) {
+            android.util.Log.e("MainViewModel", "initChatSessions error: ${t.message}", t)
+        }
+    }
+
+    private suspend fun loadSessionMessages(sessionId: Long) {
+        val stored = db.chatMsgDao().getMessagesSync(sessionId)
+        _chatMessages.value = if (stored.isEmpty()) {
+            listOf(greetingMessage())
+        } else {
+            stored.map { ChatMessage(id = it.id, sender = it.sender, text = it.text, modelUsed = it.modelUsed, timestamp = it.timestamp) }
+        }
+    }
+
+    fun startNewSession() {
+        viewModelScope.launch {
+            try {
+                val id = db.conversationDao().insertSession(
+                    ConversationSession(title = defaultSessionTitle(), jobTag = _assistantSelectedProject.value)
+                )
+                _chatSessions.value = db.conversationDao().getAllSessionsSync()
+                _activeSessionId.value = id
+                _chatMessages.value = listOf(greetingMessage())
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "startNewSession error: ${t.message}", t)
+            }
+        }
+    }
+
+    fun switchSession(sessionId: Long) {
+        if (_activeSessionId.value == sessionId) return
+        viewModelScope.launch {
+            try {
+                _activeSessionId.value = sessionId
+                loadSessionMessages(sessionId)
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "switchSession error: ${t.message}", t)
+            }
+        }
+    }
+
+    fun deleteSession(sessionId: Long) {
+        viewModelScope.launch {
+            try {
+                db.chatMsgDao().deleteForSession(sessionId)
+                db.conversationDao().deleteSessionById(sessionId)
+                val sessions = db.conversationDao().getAllSessionsSync()
+                _chatSessions.value = sessions
+                if (_activeSessionId.value == sessionId) {
+                    if (sessions.isNotEmpty()) {
+                        _activeSessionId.value = sessions.first().id
+                        loadSessionMessages(sessions.first().id)
+                    } else {
+                        val id = db.conversationDao().insertSession(
+                            ConversationSession(title = defaultSessionTitle(), jobTag = _assistantSelectedProject.value)
+                        )
+                        _chatSessions.value = db.conversationDao().getAllSessionsSync()
+                        _activeSessionId.value = id
+                        _chatMessages.value = listOf(greetingMessage())
+                    }
+                }
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "deleteSession error: ${t.message}", t)
+            }
+        }
+    }
+
     // Assistant selected project filter ("Todos" or specific project)
     private val _assistantSelectedProject = MutableStateFlow("Todos")
     val assistantSelectedProject: StateFlow<String> = _assistantSelectedProject.asStateFlow()
@@ -137,6 +245,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 android.util.Log.e("MainViewModel", "Seed initial data error: ${t.message}", t)
             }
             try {
+                initChatSessions()
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "Chat sessions init error: ${t.message}", t)
+            }
+            try {
                 webhookServer.start()
             } catch (t: Throwable) {
                 android.util.Log.e("MainViewModel", "Webhook start error: ${t.message}", t)
@@ -161,8 +274,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             tts = TextToSpeech(context) { status ->
                 try {
                     if (status == TextToSpeech.SUCCESS) {
-                        tts?.language = Locale("es", "ES")
                         isTtsReady = true
+                        applyTtsConfig()
                     }
                 } catch (t: Throwable) {
                     android.util.Log.e("MainViewModel", "TTS config error: ${t.message}", t)
@@ -173,10 +286,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun applyTtsConfig() {
+        val engine = tts ?: return
+        try {
+            engine.setSpeechRate(prefs.getTtsRate())
+            engine.setPitch(prefs.getTtsPitch())
+            val savedVoice = prefs.getTtsVoiceName()
+            val match = engine.voices?.firstOrNull { it.name == savedVoice }
+            if (match != null) {
+                engine.voice = match
+            } else {
+                engine.language = Locale("es", "ES")
+            }
+        } catch (t: Throwable) {
+            android.util.Log.e("MainViewModel", "applyTtsConfig error: ${t.message}", t)
+        }
+    }
+
+    // --- Ajustes de voz expuestos a la UI ---
+    private val _ttsRate = MutableStateFlow(prefs.getTtsRate())
+    val ttsRate: StateFlow<Float> = _ttsRate.asStateFlow()
+
+    private val _ttsPitch = MutableStateFlow(prefs.getTtsPitch())
+    val ttsPitch: StateFlow<Float> = _ttsPitch.asStateFlow()
+
+    private val _ttsVoiceName = MutableStateFlow(prefs.getTtsVoiceName())
+    val ttsVoiceName: StateFlow<String> = _ttsVoiceName.asStateFlow()
+
+    fun updateTtsSettings(rate: Float? = null, pitch: Float? = null, voiceName: String? = null) {
+        rate?.let { prefs.setTtsRate(it); _ttsRate.value = prefs.getTtsRate() }
+        pitch?.let { prefs.setTtsPitch(it); _ttsPitch.value = prefs.getTtsPitch() }
+        voiceName?.let { prefs.setTtsVoiceName(it); _ttsVoiceName.value = it }
+        applyTtsConfig()
+    }
+
+    /** Voces en español disponibles: (nombre técnico, etiqueta para mostrar). */
+    fun getSpanishVoiceOptions(): List<Pair<String, String>> {
+        val engine = tts ?: return emptyList()
+        return try {
+            engine.voices
+                ?.filter { it.locale.language.equals("es", ignoreCase = true) }
+                ?.map { v -> v.name to "${v.name.replace("#", " ").trim()} (${v.locale})" }
+                .orEmpty()
+        } catch (t: Throwable) {
+            emptyList()
+        }
+    }
+
     fun speak(text: String) {
         if (isTtsReady && tts != null) {
-            val clean = text.replace(Regex("\\[Ref:[^\\]]+\\]"), "")
-            tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "tts_utterance")
+            val clean = TtsTextCleaner.clean(text)
+            if (clean.isNotBlank()) {
+                applyTtsConfig()
+                tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "tts_utterance")
+            }
         }
     }
 
@@ -468,158 +631,245 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun sendChatMessage(userText: String, autoSpeak: Boolean = false) {
         if (userText.isBlank()) return
         val polishedUserText = SpeechContextPolisher.polishDictation(userText)
+        val userMsg = ChatMessage(sender = "USER", text = polishedUserText)
         val current = _chatMessages.value.toMutableList()
-        current.add(ChatMessage(sender = "USER", text = polishedUserText))
+        current.add(userMsg)
         _chatMessages.value = current
         _isProcessingChat.value = true
 
         viewModelScope.launch {
-            val activeProject = _assistantSelectedProject.value
-
-            // 1. Guard check for "Todos" mode: Protect against write/modify operations
-            if (activeProject == "Todos" && isWriteOrModifyIntent(polishedUserText)) {
-                val guardWarning = "⚠️ **Modo 'Todos los proyectos' Protegido:**\n\n" +
-                    "En este modo global únicamente se permite la consulta de información, discusión estratégica y revisión general de tus trabajos.\n\n" +
-                    "Para evitar confusiones y asegurar que una tarea o apunte no recaiga en un proyecto equivocado, **las acciones de guardar, modificar, concluir o borrar tareas y notas RAG están protegidas**.\n\n" +
-                    "👉 **Por favor, selecciona arriba el proyecto específico** que mencionaste y vuelve a enviarme este mensaje para realizar la acción de inmediato."
-
-                val assistantMsg = ChatMessage(
-                    sender = "ASSISTANT",
-                    text = guardWarning,
-                    citations = emptyList(),
-                    modelUsed = "Neox Guard Protection"
-                )
-                val updated = _chatMessages.value.toMutableList()
-                updated.add(assistantMsg)
-                _chatMessages.value = updated
-                _isProcessingChat.value = false
-                if (autoSpeak) speak(guardWarning)
-                return@launch
+            var responseText = ""
+            var modelUsed: String? = null
+            var citations: List<RAGQueryResult> = emptyList()
+            try {
+                val activeProject = _assistantSelectedProject.value
+                val (text, model, cites) = produceChatResponse(polishedUserText, activeProject)
+                responseText = text
+                modelUsed = model
+                citations = cites
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "Chat turn error: ${t.message}", t)
+                responseText = "Ocurrió un error inesperado al procesar tu mensaje (${t.message}). Tu texto está respaldado."
+                modelUsed = "Error Handler"
             }
-
-            // 2. Direct voice action execution (1-to-1 interactive control)
-            val actionResponse = tryExecuteConversationalCommand(polishedUserText, activeProject)
-            if (actionResponse != null) {
-                val assistantMsg = ChatMessage(
-                    sender = "ASSISTANT",
-                    text = actionResponse,
-                    citations = emptyList(),
-                    modelUsed = "Neox Voice Action ($activeProject)"
-                )
-                val updated = _chatMessages.value.toMutableList()
-                updated.add(assistantMsg)
-                _chatMessages.value = updated
-                _isProcessingChat.value = false
-                if (autoSpeak) speak(actionResponse)
-                return@launch
-            }
-
-            // 3. Query RAG vector memory (isolated to project if specific project selected)
-            val jobFilter = if (activeProject == "Todos") null else activeProject
-            val relevantChunks = ragEngine.queryMemory(polishedUserText, topK = 4, jobFilter = jobFilter)
-
-            // 4. Fetch active project tasks to give LLM full context
-            val projectTasks = if (activeProject != "Todos") {
-                db.taskDao().getTasksByJobSync(activeProject)
-            } else {
-                db.taskDao().getAllTasksSync()
-            }
-
-            val contextBuilder = StringBuilder()
-            if (projectTasks.isNotEmpty()) {
-                val header = if (activeProject == "Todos") "TAREAS EN TODOS LOS PROYECTOS:" else "TAREAS REGISTRADAS EN EL PROYECTO $activeProject:"
-                contextBuilder.append("$header\n")
-                projectTasks.take(12).forEach { t ->
-                    val statusStr = if (t.isCompleted) "[CONCLUIDA]" else "[PENDIENTE]"
-                    val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(t.dueTimestamp))
-                    contextBuilder.append("• ${t.title} $statusStr | Vence: $dateStr | Prioridad: ${t.priority} | Proyecto: ${t.jobTag}\n")
-                }
-                contextBuilder.append("\n")
-            }
-
-            if (relevantChunks.isNotEmpty()) {
-                contextBuilder.append("FRAGMENTOS RELEVANTES EN MEMORIA VECTORIAL RAG:\n")
-                relevantChunks.forEachIndexed { idx, res ->
-                    contextBuilder.append("[REF ${idx + 1}] Tipo: ${res.chunk.sourceType} | Título: \"${res.chunk.title}\" | Proyecto: ${res.chunk.jobTag}\n")
-                    contextBuilder.append("Cita: \"${res.chunk.exactQuote}\"\n")
-                    contextBuilder.append("Contenido: ${res.chunk.content}\n\n")
-                }
-            }
-
-            val allJobs = db.jobProjectDao().getAllJobsSync()
-            val projectNames = if (allJobs.isNotEmpty()) allJobs.joinToString(", ") { it.name } else "General"
-
-            val projectDirectives = if (activeProject == "Todos") {
-                """
-                ESTÁS EN MODO 'TODOS LOS PROYECTOS':
-                - Este modo es exclusivamente para consulta general, análisis estratégico y visión holística de todos los proyectos ($projectNames).
-                - NO realices acciones de modificación ni guardado en este modo.
-                - Si el usuario te pide guardar o agendar una tarea aquí, indícale amablemente que seleccione el proyecto en la barra superior.
-                """.trimIndent()
-            } else {
-                """
-                ESTÁS TRABAJANDO EXCLUSIVAMENTE EN EL PROYECTO: "$activeProject".
-                - Todas las respuestas, análisis y contexto pertenecen a "$activeProject".
-                - Si el usuario te pide en lenguaje conversacional crear una tarea, concluirla, borrarla o guardar una nota, añade al final de tu respuesta el comando correspondiente:
-                  Para crear tarea: ---ACTION:CREATE_TASK|titulo|prioridad|dias---
-                  Para concluir tarea: ---ACTION:COMPLETE_TASK|titulo---
-                  Para borrar tarea: ---ACTION:DELETE_TASK|titulo---
-                  Para guardar nota en RAG: ---ACTION:SAVE_NOTE|titulo|contenido---
-                """.trimIndent()
-            }
-
-            val systemPrompt = """
-                Eres Neox Admin, el asistente ejecutivo de alta precisión para gestión multiproyecto.
-                
-                $projectDirectives
-                
-                INSTRUCCIONES CLAVE DE FORMATO Y ESTILO:
-                1. NUNCA generes ni incluyas etiquetas de razonamiento interno como <think>, </think>, o similares. Responde directamente con tu análisis o respuesta ejecutiva.
-                2. Basa tus respuestas en la memoria RAG y en las tareas listadas.
-                3. Sé proactivo, conciso, ultra-profesional y directo.
-            """.trimIndent()
-
-            val userPromptWithRag = """
-                $contextBuilder
-                MENSAJE DEL USUARIO:
-                $polishedUserText
-            """.trimIndent()
-
-            val rotatorResult = rotator.executeWithRotation(
-                systemPrompt = systemPrompt,
-                userPrompt = userPromptWithRag,
-                lane = ModelLane.REASONING,
-                maxTokens = 1400
-            )
-
-            var rawReply = if (rotatorResult.isSuccess) {
-                rotatorResult.getOrNull().orEmpty()
-            } else {
-                "El rotador probó los modelos disponibles pero ocurrió una falla temporal de conexión (${rotatorResult.exceptionOrNull()?.message}). Tu mensaje está respaldado."
-            }
-
-            // Guarantee zero thinking traces
-            rawReply = LLMRotator.cleanModelResponse(rawReply)
-
-            // Parse and execute LLM actions if present
-            val finalReply = processLLMActions(rawReply, activeProject)
 
             val assistantMsg = ChatMessage(
                 sender = "ASSISTANT",
-                text = finalReply,
-                citations = relevantChunks,
-                modelUsed = rotator.resolve()?.modelKey
+                text = responseText,
+                citations = citations,
+                modelUsed = modelUsed
             )
-
             val updated = _chatMessages.value.toMutableList()
             updated.add(assistantMsg)
             _chatMessages.value = updated
             _isProcessingChat.value = false
 
+            persistChatTurn(userMsg, assistantMsg, polishedUserText)
+
             if (autoSpeak) {
-                speak(finalReply)
+                speak(responseText)
             }
         }
+    }
+
+    /** Guarda el turno en la sesión activa, indexa el intercambio en RAG y autotitula la sesión. */
+    private suspend fun persistChatTurn(userMsg: ChatMessage, assistantMsg: ChatMessage, rawUserText: String) {
+        val sessionId = _activeSessionId.value ?: return
+        val activeProject = _assistantSelectedProject.value
+        try {
+            db.chatMsgDao().insert(
+                ChatMessageEntity(
+                    id = userMsg.id, sessionId = sessionId, sender = "USER",
+                    text = userMsg.text, timestamp = userMsg.timestamp
+                )
+            )
+            db.chatMsgDao().insert(
+                ChatMessageEntity(
+                    id = assistantMsg.id, sessionId = sessionId, sender = "ASSISTANT",
+                    text = assistantMsg.text, modelUsed = assistantMsg.modelUsed, timestamp = assistantMsg.timestamp
+                )
+            )
+            db.conversationDao().touchSession(sessionId, System.currentTimeMillis())
+
+            // Autotítulo: la sesión toma el nombre del primer mensaje del usuario
+            val session = db.conversationDao().getSessionById(sessionId)
+            if (session != null && session.title.startsWith("Conversación del")) {
+                val newTitle = rawUserText.take(32).trim().trimEnd(':', '.', ',')
+                    .replaceFirstChar { it.uppercase(Locale.getDefault()) }
+                    .ifBlank { session.title }
+                if (newTitle != session.title) {
+                    db.conversationDao().renameSession(sessionId, newTitle)
+                    _chatSessions.value = db.conversationDao().getAllSessionsSync()
+                }
+            }
+        } catch (t: Throwable) {
+            android.util.Log.e("MainViewModel", "persistChatTurn error: ${t.message}", t)
+        }
+
+        // Indexar el intercambio en memoria RAG para contexto a largo plazo (salvo avisos del sistema)
+        if (assistantMsg.modelUsed != "Neox Guard Protection") {
+            try {
+                val exchange = "Usuario: ${userMsg.text}\nAsistente: ${assistantMsg.text.take(600)}"
+                ragEngine.indexContent(
+                    sourceId = System.currentTimeMillis(),
+                    sourceType = "CHAT",
+                    title = userMsg.text.take(60).ifBlank { "Intercambio de conversación" },
+                    jobTag = if (activeProject == "Todos") "General" else activeProject,
+                    content = exchange
+                )
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "RAG chat index error: ${t.message}", t)
+            }
+        }
+    }
+
+    private suspend fun produceChatResponse(polishedUserText: String, activeProject: String): Triple<String, String?, List<RAGQueryResult>> {
+        // 1. Guard check for "Todos" mode: Protect against write/modify operations
+        if (activeProject == "Todos" && isWriteOrModifyIntent(polishedUserText)) {
+            val guardWarning = "⚠️ **Modo 'Todos los proyectos' Protegido:**\n\n" +
+                "En este modo global únicamente se permite la consulta de información, discusión estratégica y revisión general de tus trabajos.\n\n" +
+                "Para evitar confusiones y asegurar que una tarea o apunte no recaiga en un proyecto equivocado, **las acciones de guardar, modificar, concluir o borrar tareas y notas RAG están protegidas**.\n\n" +
+                "👉 **Por favor, selecciona arriba el proyecto específico** que mencionaste y vuelve a enviarme este mensaje para realizar la acción de inmediato."
+            return Triple(guardWarning, "Neox Guard Protection", emptyList())
+        }
+
+        // 2. Direct voice action execution (1-to-1 interactive control)
+        val actionResponse = tryExecuteConversationalCommand(polishedUserText, activeProject)
+        if (actionResponse != null) {
+            return Triple(actionResponse, "Neox Voice Action ($activeProject)", emptyList())
+        }
+
+        // 3. Query RAG vector memory (isolated to project if specific project selected)
+        val jobFilter = if (activeProject == "Todos") null else activeProject
+        val relevantChunks = ragEngine.queryMemory(polishedUserText, topK = 4, jobFilter = jobFilter)
+
+        // 4. Fetch active project tasks to give LLM full context
+        val projectTasks = if (activeProject != "Todos") {
+            db.taskDao().getTasksByJobSync(activeProject)
+        } else {
+            db.taskDao().getAllTasksSync()
+        }
+
+        val contextBuilder = StringBuilder()
+        if (projectTasks.isNotEmpty()) {
+            val header = if (activeProject == "Todos") "TAREAS EN TODOS LOS PROYECTOS:" else "TAREAS REGISTRADAS EN EL PROYECTO $activeProject:"
+            contextBuilder.append("$header\n")
+            projectTasks.take(12).forEach { t ->
+                val statusStr = if (t.isCompleted) "[CONCLUIDA]" else "[PENDIENTE]"
+                val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(t.dueTimestamp))
+                contextBuilder.append("• ${t.title} $statusStr | Vence: $dateStr | Prioridad: ${t.priority} | Proyecto: ${t.jobTag}\n")
+            }
+            contextBuilder.append("\n")
+        }
+
+        if (relevantChunks.isNotEmpty()) {
+            contextBuilder.append("FRAGMENTOS RELEVANTES EN MEMORIA VECTORIAL RAG:\n")
+            relevantChunks.forEachIndexed { idx, res ->
+                contextBuilder.append("[REF ${idx + 1}] Tipo: ${res.chunk.sourceType} | Título: \"${res.chunk.title}\" | Proyecto: ${res.chunk.jobTag}\n")
+                contextBuilder.append("Cita: \"${res.chunk.exactQuote}\"\n")
+                contextBuilder.append("Contenido: ${res.chunk.content}\n\n")
+            }
+        }
+
+        // 5. Memoria secuencial: últimos mensajes de ESTA conversación para continuidad
+        val recentHistory = _chatMessages.value
+            .filter { it.text.isNotBlank() }
+            .takeLast(CHAT_HISTORY_WINDOW + 1)
+            .dropLast(1) // el último es el mensaje actual que ya va aparte
+        val historyBlock = if (recentHistory.isNotEmpty()) {
+            val lines = recentHistory.joinToString("\n") { m ->
+                val role = if (m.sender == "USER") "Usuario" else "Asistente"
+                val body = if (m.text.length > CHAT_HISTORY_MAX_CHARS) m.text.take(CHAT_HISTORY_MAX_CHARS) + "..." else m.text
+                "$role: $body"
+            }
+            "HISTORIAL RECIENTE DE ESTA CONVERSACIÓN (para entender correcciones y referencias como 'esa tarea' o 'está mal'):\n$lines\n\n"
+        } else {
+            ""
+        }
+
+        val allJobs = db.jobProjectDao().getAllJobsSync()
+        val projectNames = if (allJobs.isNotEmpty()) allJobs.joinToString(", ") { it.name } else "General"
+
+        val projectDirectives = if (activeProject == "Todos") {
+            """
+                ESTÁS EN MODO 'TODOS LOS PROYECTOS':
+                - Este modo es exclusivamente para consulta general, análisis estratégico y visión holística de todos los proyectos ($projectNames).
+                - NO realices acciones de modificación ni guardado en este modo.
+                - Si el usuario te pide guardar o agendar una tarea aquí, indícale amablemente que seleccione el proyecto en la barra superior.
+            """.trimIndent()
+        } else {
+            """
+                ESTÁS TRABAJANDO EXCLUSIVAMENTE EN EL PROYECTO: "$activeProject".
+                - Todas las respuestas, análisis y contexto pertenecen a "$activeProject".
+                - Usa el HISTORIAL RECIENTE para entender correcciones: si el usuario dice que algo quedó mal o da una nueva fecha, se refiere a lo hablado antes.
+                - Si el usuario te pide en lenguaje conversacional crear una tarea, concluirla, borrarla, re-agendarla o guardar una nota, añade al final de tu respuesta el comando correspondiente:
+                  Para crear tarea: ---ACTION:CREATE_TASK|titulo|prioridad|dias|fecha(opcional dd/MM/yyyy)---
+                  Para re-agendar/cambiar fecha de una tarea (incluye cuando el usuario corrige una fecha mal agendada): ---ACTION:RESCHEDULE_TASK|titulo|dias|fecha(opcional dd/MM/yyyy)---
+                  Para concluir tarea: ---ACTION:COMPLETE_TASK|titulo---
+                  Para borrar tarea: ---ACTION:DELETE_TASK|titulo---
+                  Para guardar nota en RAG: ---ACTION:SAVE_NOTE|titulo|contenido---
+            """.trimIndent()
+        }
+
+        val nowStr = SimpleDateFormat("EEEE d 'de' MMMM 'de' yyyy, HH:mm", Locale("es", "ES")).format(Date())
+
+        val systemPrompt = """
+            Eres Neox Admin, el asistente ejecutivo de alta precisión para gestión multiproyecto.
+
+            $projectDirectives
+
+            CONTEXTO TEMPORAL (REGLA CRÍTICA):
+            - FECHA Y HORA ACTUAL: $nowStr.
+            - NUNCA agendes nada en fechas pasadas. Cuando el usuario mencione un día de la semana ("viernes"), significa SIEMPRE el PRÓXIMO viernes FUTURO a partir de la FECHA ACTUAL; calcula "dias" como la diferencia hacia esa fecha futura (0 = hoy, 1 = mañana...).
+            - Si el usuario corrige una fecha ("no, es para el siguiente viernes"), re-agenda la tarea con RESCHEDULE_TASK en lugar de crear una nueva.
+
+            INSTRUCCIONES CLAVE DE FORMATO Y ESTILO:
+            1. NUNCA generes ni incluyas etiquetas de razonamiento interno como <think>, </think>, o similares. Responde directamente con tu análisis o respuesta ejecutiva.
+            2. Basa tus respuestas en la memoria RAG, en las tareas listadas y en el historial de la conversación.
+            3. Sé proactivo, conciso, ultra-profesional y directo.
+        """.trimIndent()
+
+        val userPromptWithRag = """
+            $contextBuilder
+            $historyBlock
+            MENSAJE DEL USUARIO:
+            $polishedUserText
+        """.trimIndent()
+
+        val rotatorResult = rotator.executeWithRotation(
+            systemPrompt = systemPrompt,
+            userPrompt = userPromptWithRag,
+            lane = ModelLane.REASONING,
+            maxTokens = 1400
+        )
+
+        var rawReply = if (rotatorResult.isSuccess) {
+            rotatorResult.getOrNull().orEmpty()
+        } else {
+            "El rotador probó los modelos disponibles pero ocurrió una falla temporal de conexión (${rotatorResult.exceptionOrNull()?.message}). Tu mensaje está respaldado."
+        }
+
+        // Guarantee zero thinking traces
+        rawReply = LLMRotator.cleanModelResponse(rawReply)
+
+        // Parse and execute LLM actions if present
+        val finalReply = processLLMActions(rawReply, activeProject)
+
+        return Triple(finalReply, rotator.resolve()?.modelKey, relevantChunks)
+    }
+
+    /** Resuelve el vencimiento de una acción LLM: fecha dd/MM/yyyy futura válida, o días (nunca negativos). */
+    private fun resolveActionDueTimestamp(dateParam: String?, daysParam: String?): Long {
+        val now = System.currentTimeMillis()
+        if (!dateParam.isNullOrBlank()) {
+            try {
+                val fmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).apply { isLenient = false }
+                val parsed = fmt.parse(dateParam.trim())
+                if (parsed != null && parsed.time > now) return parsed.time
+            } catch (_: Exception) { /* fecha inválida o pasada: se ignora */ }
+        }
+        val days = (daysParam?.trim()?.toLongOrNull() ?: 2L).coerceIn(0L, 365L)
+        return if (days <= 0L) now + 4 * 3600_000L else now + days * 86400_000L
     }
 
     private suspend fun processLLMActions(reply: String, activeProject: String): String {
@@ -639,8 +889,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val parts = payload.split("|")
                 val title = parts.getOrNull(0)?.trim()?.ifBlank { "Nueva tarea" } ?: "Nueva tarea"
                 val priority = parts.getOrNull(1)?.trim()?.uppercase(Locale.getDefault()) ?: "MEDIA"
-                val days = parts.getOrNull(2)?.trim()?.toLongOrNull() ?: 2L
-                val due = System.currentTimeMillis() + days * 86400 * 1000L
+                val due = resolveActionDueTimestamp(parts.getOrNull(3), parts.getOrNull(2))
 
                 val task = WorkTask(
                     title = title,
@@ -652,7 +901,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 val id = db.taskDao().insertTask(task)
                 ragEngine.indexContent(id, "TASK", title, activeProject, "Tarea: $title para $activeProject")
-                "\n\n✅ *[Acción ejecutada: Tarea \"$title\" creada y agendada en $activeProject]*"
+                val dateFmt = SimpleDateFormat("EEEE d 'de' MMMM, HH:mm", Locale("es", "ES")).format(Date(due))
+                "\n\n✅ *[Acción ejecutada: Tarea \"$title\" creada y agendada en $activeProject para el $dateFmt]*"
+            }
+            "RESCHEDULE_TASK" -> {
+                val parts = payload.split("|")
+                val titleKeyword = parts.getOrNull(0)?.trim()?.lowercase(Locale.getDefault()).orEmpty()
+                val due = resolveActionDueTimestamp(parts.getOrNull(3), parts.getOrNull(2))
+                val projectTasks = db.taskDao().getTasksByJobSync(activeProject)
+                val target = projectTasks.firstOrNull {
+                    titleKeyword.isNotBlank() && it.title.lowercase(Locale.getDefault()).contains(titleKeyword)
+                } ?: projectTasks.filter { !it.isCompleted }.maxByOrNull { it.createdAt }
+                ?: projectTasks.maxByOrNull { it.createdAt }
+
+                if (target != null) {
+                    db.taskDao().updateTaskDue(target.id, due)
+                    val dateFmt = SimpleDateFormat("EEEE d 'de' MMMM, HH:mm", Locale("es", "ES")).format(Date(due))
+                    "\n\n✅ *[Acción ejecutada: Tarea \"${target.title}\" re-agendada al $dateFmt en $activeProject]*"
+                } else {
+                    ""
+                }
             }
             "COMPLETE_TASK" -> {
                 val titleKeyword = payload.trim().lowercase(Locale.getDefault())
@@ -780,11 +1048,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // 3. Crear / Agendar / Guardar Tarea
+        // 3. Re-agendar / corregir fecha de tarea ("está mal, es para el siguiente viernes")
+        val isRescheduleIntent = (lower.contains("reagenda") || lower.contains("reprograma") ||
+            lower.contains("cambia la fecha") || lower.contains("cambiale la fecha") || lower.contains("cambiar la fecha") ||
+            lower.contains("muevela") || lower.contains("muévela") || lower.contains("mover a") ||
+            lower.contains("esta mal") || lower.contains("está mal") || lower.contains("agendaste mal") ||
+            lower.contains("mal agendada") || lower.contains("mal agendado") || lower.contains("la agendaste") ||
+            lower.contains("deberia ser") || lower.contains("debería ser") || lower.contains("es para el") ||
+            lower.contains("es para la") || lower.contains("es para este") || lower.contains("es para ma"))
+        val parsedDue = SpanishDateParser.resolveDueTimestamp(lower)
+        if (isRescheduleIntent && parsedDue != null && activeProject != "Todos") {
+            val projectTasks = db.taskDao().getTasksByJobSync(activeProject)
+            val target = projectTasks.firstOrNull { t -> t.title.lowercase(Locale.getDefault()).isNotBlank() && lower.contains(t.title.lowercase(Locale.getDefault()).take(18)) }
+                ?: projectTasks.filter { !it.isCompleted }.maxByOrNull { it.createdAt }
+                ?: projectTasks.maxByOrNull { it.createdAt }
+
+            if (target != null) {
+                db.taskDao().updateTaskDue(target.id, parsedDue)
+                val dateFmt = SimpleDateFormat("EEEE d 'de' MMMM, HH:mm", Locale("es", "ES")).format(Date(parsedDue))
+                return "📅 **Tarea Re-agendada:**\nCorregí la fecha de la tarea:\n• **\"${target.title}\"**\nNuevo vencimiento: **$dateFmt** (proyecto **$activeProject**).\n\nSi no era esta tarea, dime su nombre y la fecha correcta."
+            }
+            return "No encontré ninguna tarea para re-agendar en el proyecto **$activeProject**. Dime el nombre de la tarea y la fecha correcta."
+        }
+
+        // 4. Crear / Agendar / Guardar Tarea
         val isCreateTaskIntent = (lower.contains("crea") || lower.contains("agrega") || lower.contains("anota") ||
             lower.contains("guarda") || lower.contains("agenda") || lower.startsWith("recuérdame") ||
             lower.startsWith("recuerdame") || lower.contains("nueva tarea") || lower.contains("necesito tener lista")) &&
             (lower.contains("tarea") || lower.contains("recordatorio") || lower.contains("pendiente") ||
+            lower.contains("junta") || lower.contains("reunión") || lower.contains("reunion") ||
             lower.startsWith("recuérdame") || lower.startsWith("recuerdame") || lower.contains("agéndamela") ||
             lower.contains("agendame") || lower.contains("necesito tener lista"))
 
@@ -796,15 +1088,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (rawTitle.isBlank()) rawTitle = "Tarea pendiente"
 
             val now = System.currentTimeMillis()
-            val dueTimestamp = when {
-                lower.contains("en 3 días") || lower.contains("tres días") || lower.contains("3 dias") || lower.contains("tres dias") -> now + 3 * 86400 * 1000L
-                lower.contains("en 2 días") || lower.contains("dos días") || lower.contains("2 dias") || lower.contains("dos dias") -> now + 2 * 86400 * 1000L
-                lower.contains("en 5 días") || lower.contains("cinco días") || lower.contains("5 dias") -> now + 5 * 86400 * 1000L
-                lower.contains("en 7 días") || lower.contains("una semana") || lower.contains("7 dias") -> now + 7 * 86400 * 1000L
-                lower.contains("mañana") -> now + 86400 * 1000L
-                lower.contains("hoy") -> now + 4 * 3600 * 1000L
-                else -> now + 86400 * 1000L * 2
-            }
+            // Fecha SIEMPRE futura: parsea días de la semana ("viernes"), "mañana", "en N días", fechas exactas...
+            val dueTimestamp = SpanishDateParser.resolveDueTimestamp(lower, now) ?: (now + 86400 * 1000L * 2)
 
             val priority = if (lower.contains("urgente") || lower.contains("alta") || lower.contains("inmediato")) "ALTA"
                            else if (lower.contains("baja")) "BAJA" else "MEDIA"

@@ -6,6 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.data.model.ChatMessageEntity
+import com.example.data.model.ConversationSession
 import com.example.data.model.DocumentItem
 import com.example.data.model.JobProject
 import com.example.data.model.MeetingNote
@@ -22,9 +24,11 @@ import com.example.data.model.WorkTask
         DocumentItem::class,
         MemoryChunk::class,
         VaultEntry::class,
-        ProcessingQueueItem::class
+        ProcessingQueueItem::class,
+        ConversationSession::class,
+        ChatMessageEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -35,6 +39,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun memoryDao(): MemoryDao
     abstract fun vaultDao(): VaultDao
     abstract fun queueDao(): QueueDao
+    abstract fun conversationDao(): ConversationDao
+    abstract fun chatMsgDao(): ChatMsgDao
 
     companion object {
         @Volatile
@@ -62,6 +68,26 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v3: sesiones de conversación + persistencia del chat del asistente (aditiva, sin pérdida de datos)
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `conversation_sessions` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`title` TEXT NOT NULL, `jobTag` TEXT NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, `lastActiveAt` INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `chat_messages` (" +
+                        "`id` TEXT NOT NULL, `sessionId` INTEGER NOT NULL, " +
+                        "`sender` TEXT NOT NULL, `text` TEXT NOT NULL, " +
+                        "`modelUsed` TEXT, `timestamp` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_messages_sessionId` ON `chat_messages` (`sessionId`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -69,7 +95,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "omniwork_vault.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
                     .build()

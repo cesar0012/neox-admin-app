@@ -30,24 +30,33 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeMute
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -81,10 +90,13 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
     val rotatorStatus by viewModel.rotatorStatus.collectAsStateWithLifecycle()
     val assistantProject by viewModel.assistantSelectedProject.collectAsStateWithLifecycle()
     val jobs by viewModel.allJobs.collectAsStateWithLifecycle()
+    val sessions by viewModel.chatSessions.collectAsStateWithLifecycle()
+    val activeSessionId by viewModel.activeSessionId.collectAsStateWithLifecycle()
 
     var inputPrompt by remember { mutableStateOf("") }
     var autoSpeakEnabled by remember { mutableStateOf(true) }
     var isListening by remember { mutableStateOf(false) }
+    var showTtsSettings by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     // Speech recognition launcher
@@ -156,6 +168,83 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                             fontWeight = FontWeight.Bold
                         )
                     }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Barra de sesiones de conversación (temas/proyectos separados) + ajustes de voz
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                var sessionMenuOpen by remember { mutableStateOf(false) }
+                val currentSession = sessions.firstOrNull { it.id == activeSessionId }
+
+                Box {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Slate800)
+                            .border(1.dp, Slate700, RoundedCornerShape(8.dp))
+                            .clickable { sessionMenuOpen = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Default.SmartToy, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(13.dp))
+                            Text(
+                                text = currentSession?.title?.take(24) ?: "Conversación",
+                                color = Slate400,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1
+                            )
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Cambiar conversación", tint = Slate400, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                    DropdownMenu(expanded = sessionMenuOpen, onDismissRequest = { sessionMenuOpen = false }) {
+                        if (sessions.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("Sin conversaciones", fontSize = 12.sp) },
+                                onClick = {}
+                            )
+                        }
+                        sessions.forEach { s ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        s.title.take(40),
+                                        fontSize = 12.sp,
+                                        color = if (s.id == activeSessionId) CyanNeon else Color.White,
+                                        maxLines = 1
+                                    )
+                                },
+                                trailingIcon = {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Eliminar conversación",
+                                        tint = Slate400,
+                                        modifier = Modifier.size(16.dp).clickable { viewModel.deleteSession(s.id) }
+                                    )
+                                },
+                                onClick = {
+                                    viewModel.switchSession(s.id)
+                                    sessionMenuOpen = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                IconButton(onClick = { viewModel.startNewSession() }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Add, contentDescription = "Nueva conversación", tint = CyanNeon, modifier = Modifier.size(16.dp))
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                IconButton(onClick = { showTtsSettings = true }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Tune, contentDescription = "Ajustes de voz", tint = CyanNeon, modifier = Modifier.size(16.dp))
                 }
             }
 
@@ -405,6 +494,98 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
             }
         }
     }
+
+    if (showTtsSettings) {
+        TtsSettingsDialog(viewModel = viewModel, onDismiss = { showTtsSettings = false })
+    }
+}
+
+@Composable
+private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
+    val savedRate by viewModel.ttsRate.collectAsStateWithLifecycle()
+    val savedPitch by viewModel.ttsPitch.collectAsStateWithLifecycle()
+    val savedVoice by viewModel.ttsVoiceName.collectAsStateWithLifecycle()
+    var localRate by remember { mutableStateOf(savedRate) }
+    var localPitch by remember { mutableStateOf(savedPitch) }
+    val voices = remember { viewModel.getSpanishVoiceOptions() }
+    var voiceMenuOpen by remember { mutableStateOf(false) }
+    val currentVoiceLabel = voices.firstOrNull { it.first == savedVoice }?.second ?: "Predeterminada (es-ES)"
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Slate900,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Tune, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp))
+                Text("Ajustes de Voz", color = CyanNeon, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Velocidad: x" + "%.2f".format(localRate), color = Slate400, fontSize = 12.sp)
+                Slider(
+                    value = localRate,
+                    onValueChange = { localRate = it },
+                    valueRange = 0.5f..2.0f,
+                    onValueChangeFinished = { viewModel.updateTtsSettings(rate = localRate) }
+                )
+                Text("Tono: x" + "%.2f".format(localPitch), color = Slate400, fontSize = 12.sp)
+                Slider(
+                    value = localPitch,
+                    onValueChange = { localPitch = it },
+                    valueRange = 0.5f..2.0f,
+                    onValueChangeFinished = { viewModel.updateTtsSettings(pitch = localPitch) }
+                )
+                Text("Voz (${voices.size} disponibles en español):", color = Slate400, fontSize = 12.sp)
+                Box {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Slate800)
+                            .border(1.dp, Slate700, RoundedCornerShape(8.dp))
+                            .clickable { voiceMenuOpen = true }
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(currentVoiceLabel, color = Color.White, fontSize = 12.sp, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Elegir voz", tint = Slate400, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    DropdownMenu(expanded = voiceMenuOpen, onDismissRequest = { voiceMenuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Predeterminada (es-ES)", fontSize = 12.sp) },
+                            onClick = {
+                                viewModel.updateTtsSettings(voiceName = "")
+                                voiceMenuOpen = false
+                            }
+                        )
+                        voices.forEach { v ->
+                            DropdownMenuItem(
+                                text = { Text(v.second, fontSize = 12.sp) },
+                                onClick = {
+                                    viewModel.updateTtsSettings(voiceName = v.first)
+                                    voiceMenuOpen = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                viewModel.updateTtsSettings(rate = localRate, pitch = localPitch)
+                onDismiss()
+            }) { Text("Guardar", color = CyanNeon) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar", color = Slate400) }
+        }
+    )
 }
 
 @Composable
