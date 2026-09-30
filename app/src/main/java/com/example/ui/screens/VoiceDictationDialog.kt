@@ -28,10 +28,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -47,8 +50,12 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -233,6 +240,8 @@ fun VoiceDictationDialog(
     var engineAvailable by remember { mutableStateOf(true) }
     var wantsListening by remember { mutableStateOf(true) }
     var confirmClear by remember { mutableStateOf(false) }
+    var isEditing by remember { mutableStateOf(false) }
+    var editText by rememberSaveable { mutableStateOf("") }
     var hasPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -281,7 +290,29 @@ fun VoiceDictationDialog(
         }
     }
 
+    /** Entra a modo edición: congela lo capturado, pausa el micrófono y deja corregir con el teclado. */
+    fun startEditing() {
+        if (isEditing) return
+        editText = if (partialText.isBlank()) finalizedText
+        else if (finalizedText.isBlank()) partialText
+        else "$finalizedText $partialText"
+        isEditing = true
+        if (wantsListening) {
+            wantsListening = false
+            controller.pause()
+        }
+    }
+
+    /** Termina la edición: el texto corregido queda como base y el dictado puede continuar encima. */
+    fun commitEditing() {
+        if (!isEditing) return
+        finalizedText = editText.trim()
+        partialText = ""
+        isEditing = false
+    }
+
     fun togglePauseResume() {
+        if (isEditing) commitEditing()
         if (wantsListening) {
             wantsListening = false
             controller.pause()
@@ -295,13 +326,14 @@ fun VoiceDictationDialog(
     fun clearAll() {
         finalizedText = ""
         partialText = ""
+        editText = ""
         confirmClear = false
     }
 
     fun sendNow() {
         wantsListening = false
         controller.pause()
-        val toSend = finalizedText.ifBlank { partialText }
+        val toSend = if (isEditing) editText.trim() else finalizedText.ifBlank { partialText }
         onSend(SpeechContextPolisher.polishDictation(toSend))
     }
 
@@ -316,12 +348,13 @@ fun VoiceDictationDialog(
     val composedText = if (partialText.isBlank()) finalizedText
     else if (finalizedText.isBlank()) partialText
     else "$finalizedText $partialText"
-    val wordCount = composedText.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+    val displayedText = if (isEditing) editText else composedText
+    val wordCount = displayedText.trim().split(Regex("\\s+")).count { it.isNotBlank() }
     val scrollState = rememberScrollState()
 
-    // Auto-scroll al último texto dictado
+    // Auto-scroll al último texto dictado (solo fuera del modo edición)
     LaunchedEffect(composedText.length) {
-        if (composedText.isNotEmpty()) scrollState.animateScrollTo(scrollState.maxValue)
+        if (!isEditing && composedText.isNotEmpty()) scrollState.animateScrollTo(scrollState.maxValue)
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -432,43 +465,116 @@ fun VoiceDictationDialog(
                     }
                 }
 
-                // ───────── Transcripción ─────────
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                        .height(210.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Slate950)
-                        .border(1.dp, Slate800, RoundedCornerShape(14.dp))
-                        .verticalScroll(scrollState)
-                        .padding(12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (composedText.isBlank()) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.Mic, contentDescription = null, tint = Slate700, modifier = Modifier.size(28.dp))
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text("Habla y tu dictado aparecerá aquí...", color = Slate700, fontSize = 12.sp)
-                        }
-                    } else {
-                        Column {
-                            if (finalizedText.isNotBlank()) {
+                // ───────── Transcripción (tocable para corregir con teclado) ─────────
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = when {
+                                isEditing -> "Editando — micrófono en pausa"
+                                isListening -> "Escuchando (lo parcial va en cian)"
+                                else -> "Transcripción"
+                            },
+                            color = if (isEditing) AmberWarning else Slate400,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        // Botón Editar / Listo
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isEditing) CyanNeon.copy(alpha = 0.15f) else Slate800)
+                                .border(
+                                    1.dp,
+                                    if (isEditing) CyanNeon else Slate700,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { if (isEditing) commitEditing() else startEditing() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(
+                                    if (isEditing) Icons.Default.Check else Icons.Default.Edit,
+                                    contentDescription = if (isEditing) "Terminar edición" else "Editar texto capturado",
+                                    tint = CyanNeon,
+                                    modifier = Modifier.size(13.dp)
+                                )
                                 Text(
-                                    text = finalizedText,
-                                    color = Color.White,
-                                    fontSize = 15.sp,
-                                    lineHeight = 22.sp
+                                    if (isEditing) "Listo" else "Editar",
+                                    color = CyanNeon,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
-                            if (partialText.isNotBlank()) {
-                                Text(
-                                    text = if (finalizedText.isNotBlank()) " $partialText" else partialText,
-                                    color = CyanNeon.copy(alpha = 0.75f),
-                                    fontSize = 15.sp,
-                                    lineHeight = 22.sp,
-                                    fontStyle = FontStyle.Italic
+                        }
+                    }
+
+                    val editFocusRequester = remember { FocusRequester() }
+                    LaunchedEffect(isEditing) {
+                        if (isEditing) {
+                            try { editFocusRequester.requestFocus() } catch (_: Exception) {}
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(190.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (isEditing) Slate800 else Slate950)
+                            .border(
+                                1.dp,
+                                if (isEditing) AmberWarning.copy(alpha = 0.55f) else Slate800,
+                                RoundedCornerShape(14.dp)
+                            )
+                            .clickable(enabled = !isEditing) { startEditing() }
+                            .verticalScroll(scrollState)
+                            .padding(12.dp)
+                    ) {
+                        when {
+                            isEditing -> {
+                                BasicTextField(
+                                    value = editText,
+                                    onValueChange = { editText = it },
+                                    textStyle = TextStyle(color = Color.White, fontSize = 15.sp, lineHeight = 22.sp),
+                                    cursorBrush = SolidColor(CyanNeon),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(editFocusRequester)
                                 )
+                            }
+                            composedText.isBlank() -> {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.Mic, contentDescription = null, tint = Slate700, modifier = Modifier.size(28.dp))
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text("Habla, o toca aquí para escribir y corregir manualmente...", color = Slate700, fontSize = 12.sp)
+                                }
+                            }
+                            else -> {
+                                Column {
+                                    if (finalizedText.isNotBlank()) {
+                                        Text(
+                                            text = finalizedText,
+                                            color = Color.White,
+                                            fontSize = 15.sp,
+                                            lineHeight = 22.sp
+                                        )
+                                    }
+                                    if (partialText.isNotBlank()) {
+                                        Text(
+                                            text = if (finalizedText.isNotBlank()) " $partialText" else partialText,
+                                            color = CyanNeon.copy(alpha = 0.75f),
+                                            fontSize = 15.sp,
+                                            lineHeight = 22.sp,
+                                            fontStyle = FontStyle.Italic
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -489,7 +595,11 @@ fun VoiceDictationDialog(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = if (confirmClear) "Toca de nuevo en Rojo para confirmar el borrado" else "El texto se conserva entre pausas",
+                        text = when {
+                            confirmClear -> "Toca de nuevo en Rojo para confirmar el borrado"
+                            isEditing -> "Corrige con el teclado; con Listo o Reanudar, el dictado sigue sobre lo corregido"
+                            else -> "Toca el texto o Editar para corregir antes de enviar"
+                        },
                         color = if (confirmClear) AmberWarning else Slate700,
                         fontSize = 9.sp
                     )
