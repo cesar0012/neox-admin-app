@@ -198,12 +198,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val sessions = db.conversationDao().getAllSessionsSync()
                 _chatSessions.value = sessions
                 if (_activeSessionId.value == sessionId) {
-                    if (sessions.isNotEmpty()) {
-                        _activeSessionId.value = sessions.first().id
-                        loadSessionMessages(sessions.first().id)
+                    val project = _assistantSelectedProject.value
+                    // El reemplazo se busca DENTRO del proyecto activo; si no hay, se crea uno nuevo
+                    val target = sessions.firstOrNull { it.jobTag.equals(project, ignoreCase = true) }
+                    if (target != null) {
+                        _activeSessionId.value = target.id
+                        loadSessionMessages(target.id)
                     } else {
                         val id = db.conversationDao().insertSession(
-                            ConversationSession(title = defaultSessionTitle(), jobTag = _assistantSelectedProject.value)
+                            ConversationSession(title = defaultSessionTitle(), jobTag = project)
                         )
                         _chatSessions.value = db.conversationDao().getAllSessionsSync()
                         _activeSessionId.value = id
@@ -220,8 +223,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _assistantSelectedProject = MutableStateFlow("Todos")
     val assistantSelectedProject: StateFlow<String> = _assistantSelectedProject.asStateFlow()
 
+    /** Cada proyecto tiene SU PROPIA conversación: al cambiar de proyecto se cambia de sesión. */
     fun setAssistantProject(project: String) {
+        if (_assistantSelectedProject.value == project) return
         _assistantSelectedProject.value = project
+        viewModelScope.launch {
+            try {
+                val sessions = db.conversationDao().getAllSessionsSync()
+                val target = sessions.firstOrNull { it.jobTag.equals(project, ignoreCase = true) }
+                if (target != null) {
+                    _activeSessionId.value = target.id
+                    loadSessionMessages(target.id)
+                } else {
+                    val id = db.conversationDao().insertSession(
+                        ConversationSession(title = defaultSessionTitle(), jobTag = project)
+                    )
+                    _chatSessions.value = db.conversationDao().getAllSessionsSync()
+                    _activeSessionId.value = id
+                    _chatMessages.value = listOf(greetingMessage())
+                }
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "setAssistantProject session switch error: ${t.message}", t)
+            }
+        }
     }
 
     // Banner informativo del asistente: solo la primera vez; se puede reabrir con el botón ?
@@ -348,7 +372,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (isTtsReady && tts != null) {
             val clean = TtsTextCleaner.clean(text)
             if (clean.isNotBlank()) {
-                applyTtsConfig()
                 tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "tts_utterance")
             }
         }
@@ -372,9 +395,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Reproduce una muestra de voz con la configuración actual del motor. */
-    fun speakSample() {
-        speak("Hola, soy tu asistente Neox Admin. Así se escucha esta voz con la velocidad y el tono que elegiste.")
+    /** Reproduce una muestra de voz. Si se pasan overrides, se aplican SIN persistir:
+     *  así se escucha la voz/velocidad/tono en prueba ANTES de guardar. */
+    fun speakSample(rate: Float? = null, pitch: Float? = null, voiceName: String? = null) {
+        val engine = tts ?: return
+        if (!isTtsReady) return
+        if (rate != null || pitch != null || voiceName != null) {
+            applyTtsPreview(
+                rate ?: prefs.getTtsRate(),
+                pitch ?: prefs.getTtsPitch(),
+                voiceName
+            )
+        }
+        val clean = TtsTextCleaner.clean(
+            "Hola, soy tu asistente Neox Admin. Así se escucha esta voz con la velocidad y el tono que elegiste."
+        )
+        if (clean.isNotBlank()) {
+            engine.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "tts_preview")
+        }
     }
 
     /** Restaura la configuración TTS persistida (al cancelar la previsualización). */

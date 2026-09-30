@@ -1,9 +1,11 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,15 +32,20 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeMute
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -65,7 +72,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -79,6 +89,7 @@ import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
+import com.example.ui.theme.Slate950
 
 @Composable
 fun ChatAssistantScreen(viewModel: MainViewModel) {
@@ -218,14 +229,16 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Selector de conversación (temas separados y persistidos)
+            // Selector de conversación: cada proyecto tiene SUS PROPIAS conversaciones
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 var sessionMenuOpen by remember { mutableStateOf(false) }
-                val currentSession = sessions.firstOrNull { it.id == activeSessionId }
+                val projectSessions = sessions.filter { it.jobTag.equals(assistantProject, ignoreCase = true) }
+                val currentSession = projectSessions.firstOrNull { it.id == activeSessionId }
+                    ?: sessions.firstOrNull { it.id == activeSessionId }
 
                 Text("En:", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
 
@@ -251,13 +264,13 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                         }
                     }
                     DropdownMenu(expanded = sessionMenuOpen, onDismissRequest = { sessionMenuOpen = false }) {
-                        if (sessions.isEmpty()) {
+                        if (projectSessions.isEmpty()) {
                             DropdownMenuItem(
-                                text = { Text("Sin conversaciones", fontSize = 12.sp) },
+                                text = { Text("Sin conversaciones en este proyecto", fontSize = 12.sp) },
                                 onClick = {}
                             )
                         }
-                        sessions.forEach { s ->
+                        projectSessions.forEach { s ->
                             DropdownMenuItem(
                                 text = {
                                     Text(
@@ -287,7 +300,7 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                 Spacer(modifier = Modifier.weight(1f))
 
                 Text(
-                    text = "${sessions.size} conversación" + if (sessions.size == 1) "" else "es",
+                    text = "${projectSessions.size} en $assistantProject",
                     color = Slate700,
                     fontSize = 9.sp
                 )
@@ -458,18 +471,6 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = { autoSpeakEnabled = !autoSpeakEnabled },
-                    modifier = Modifier.size(36.dp).testTag("chat_voice_speaker_btn")
-                ) {
-                    Icon(
-                        if (autoSpeakEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.VolumeMute,
-                        contentDescription = "Alternar voz",
-                        tint = if (autoSpeakEnabled) CyanNeon else Slate400,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                IconButton(
                     onClick = { showDictation = true },
                     modifier = Modifier.testTag("voice_assistant_mic_btn")
                 ) {
@@ -539,111 +540,216 @@ private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
     var localPitch by remember { mutableStateOf(savedPitch) }
     var localVoice by remember { mutableStateOf<String?>(null) } // null = usar la voz guardada
     val voices = remember { viewModel.getSpanishVoiceOptions() }
-    var voiceMenuOpen by remember { mutableStateOf(false) }
     val effectiveVoice = localVoice ?: savedVoice
     val currentVoiceLabel = voices.firstOrNull { it.first == effectiveVoice }?.second
         ?: if (effectiveVoice.isBlank()) "Predeterminada (es-ES)" else effectiveVoice
 
+    fun closeRestoring() {
+        viewModel.restoreTtsSettings()
+        onDismiss()
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { closeRestoring() },
         containerColor = Slate900,
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Default.Tune, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp))
-                Text("Ajustes de Voz", color = CyanNeon, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(CyanNeon.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Tune, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp))
+                }
+                Column {
+                    Text("Ajustes de Voz", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Prueba antes de guardar; Cancelar revierte todo", color = Slate400, fontSize = 10.sp)
+                }
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Velocidad: x" + "%.2f".format(localRate), color = Slate400, fontSize = 12.sp)
-                Slider(
-                    value = localRate,
-                    onValueChange = { localRate = it },
-                    valueRange = 0.5f..2.0f,
-                    onValueChangeFinished = { viewModel.applyTtsPreview(localRate, localPitch, localVoice) }
-                )
-                Text("Tono: x" + "%.2f".format(localPitch), color = Slate400, fontSize = 12.sp)
-                Slider(
-                    value = localPitch,
-                    onValueChange = { localPitch = it },
-                    valueRange = 0.5f..2.0f,
-                    onValueChangeFinished = { viewModel.applyTtsPreview(localRate, localPitch, localVoice) }
-                )
-                Text("Voz (${voices.size} disponibles en español):", color = Slate400, fontSize = 12.sp)
-                Box {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Slate800)
-                            .border(1.dp, Slate700, RoundedCornerShape(8.dp))
-                            .clickable { voiceMenuOpen = true }
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // ── Velocidad ──
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Speed, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(15.dp))
+                            Text("Velocidad", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(CyanNeon.copy(alpha = 0.15f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
-                            Text(currentVoiceLabel, color = Color.White, fontSize = 12.sp, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Elegir voz", tint = Slate400, modifier = Modifier.size(16.dp))
+                            Text("x" + "%.2f".format(localRate), color = CyanNeon, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
-                    DropdownMenu(expanded = voiceMenuOpen, onDismissRequest = { voiceMenuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Predeterminada (es-ES)", fontSize = 12.sp) },
+                    Slider(
+                        value = localRate,
+                        onValueChange = { localRate = it },
+                        valueRange = 0.5f..2.0f,
+                        onValueChangeFinished = { viewModel.applyTtsPreview(localRate, localPitch, localVoice) }
+                    )
+                }
+
+                // ── Tono ──
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.GraphicEq, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(15.dp))
+                            Text("Tono", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(CyanNeon.copy(alpha = 0.15f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("x" + "%.2f".format(localPitch), color = CyanNeon, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Slider(
+                        value = localPitch,
+                        onValueChange = { localPitch = it },
+                        valueRange = 0.5f..2.0f,
+                        onValueChangeFinished = { viewModel.applyTtsPreview(localRate, localPitch, localVoice) }
+                    )
+                }
+
+                // ── Voz (lista estilo radio) ──
+                Text(
+                    text = "Voz · ${voices.size} en español",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Slate950)
+                        .border(1.dp, Slate800, RoundedCornerShape(10.dp)),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    item {
+                        VoiceOptionRow(
+                            label = "Predeterminada (es-ES)",
+                            subLabel = "Voz del sistema",
+                            selected = effectiveVoice.isBlank(),
                             onClick = {
                                 localVoice = ""
                                 viewModel.applyTtsPreview(localRate, localPitch, localVoice)
-                                voiceMenuOpen = false
                             }
                         )
-                        voices.forEach { v ->
-                            DropdownMenuItem(
-                                text = { Text(v.second, fontSize = 12.sp) },
-                                onClick = {
-                                    localVoice = v.first
-                                    viewModel.applyTtsPreview(localRate, localPitch, localVoice)
-                                    voiceMenuOpen = false
-                                }
-                            )
-                        }
+                    }
+                    items(voices) { v ->
+                        VoiceOptionRow(
+                            label = v.second,
+                            subLabel = v.first,
+                            selected = effectiveVoice == v.first,
+                            onClick = {
+                                localVoice = v.first
+                                viewModel.applyTtsPreview(localRate, localPitch, localVoice)
+                            }
+                        )
                     }
                 }
 
-                // Botón de prueba: escucha la voz ANTES de guardar
+                // ── Botón de prueba ──
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(CyanNeon.copy(alpha = 0.15f))
-                        .border(1.dp, CyanNeon, RoundedCornerShape(8.dp))
+                        .border(1.dp, CyanNeon, RoundedCornerShape(12.dp))
                         .clickable {
-                            viewModel.applyTtsPreview(localRate, localPitch, localVoice)
-                            viewModel.speakSample()
+                            viewModel.speakSample(
+                                rate = localRate,
+                                pitch = localPitch,
+                                voiceName = localVoice ?: savedVoice
+                            )
                         }
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp))
-                        Text("Probar cómo suena", color = CyanNeon, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp))
+                        Text("Probar cómo suena", color = CyanNeon, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                viewModel.updateTtsSettings(rate = localRate, pitch = localPitch, voiceName = localVoice ?: savedVoice)
-                onDismiss()
-            }) { Text("Guardar", color = CyanNeon) }
+            Button(
+                onClick = {
+                    viewModel.updateTtsSettings(rate = localRate, pitch = localPitch, voiceName = localVoice ?: savedVoice)
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("Guardar", fontWeight = FontWeight.Bold)
+            }
         },
         dismissButton = {
-            TextButton(onClick = {
-                viewModel.restoreTtsSettings()
-                onDismiss()
-            }) { Text("Cancelar", color = Slate400) }
+            TextButton(onClick = { closeRestoring() }) {
+                Text("Cancelar", color = Slate400)
+            }
         }
     )
+}
+
+@Composable
+private fun VoiceOptionRow(label: String, subLabel: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) CyanNeon.copy(alpha = 0.12f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(16.dp)
+                .clip(CircleShape)
+                .border(2.dp, if (selected) CyanNeon else Slate700, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(CyanNeon)
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                label,
+                color = if (selected) CyanNeon else Color.White,
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1
+            )
+            Text(subLabel, color = Slate700, fontSize = 9.sp, maxLines = 1)
+        }
+    }
 }
 
 @Composable
@@ -696,10 +802,18 @@ private fun AssistantChip(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CleanChatBubble(message: ChatMessage, onSpeak: () -> Unit) {
     val isUser = message.sender == "USER"
     var expandedCitation by remember { mutableStateOf<RAGQueryResult?>(null) }
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+
+    fun copyMessage() {
+        clipboard.setText(AnnotatedString(message.text))
+        android.widget.Toast.makeText(context, "Mensaje copiado", android.widget.Toast.LENGTH_SHORT).show()
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -716,7 +830,12 @@ fun CleanChatBubble(message: ChatMessage, onSpeak: () -> Unit) {
                 containerColor = if (isUser) Color(0xFF0369A1) else Slate900
             ),
             border = if (isUser) null else CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate800)),
-            modifier = Modifier.fillMaxWidth(if (isUser) 0.85f else 0.95f)
+            modifier = Modifier
+                .fillMaxWidth(if (isUser) 0.85f else 0.95f)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { copyMessage() }
+                )
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 if (!isUser) {
@@ -729,8 +848,13 @@ fun CleanChatBubble(message: ChatMessage, onSpeak: () -> Unit) {
                             Icon(Icons.Default.SmartToy, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(15.dp))
                             Text("OmniWork Asistente", color = CyanNeon, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
-                        IconButton(onClick = onSpeak, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Escuchar", tint = Slate400, modifier = Modifier.size(15.dp))
+                        Row {
+                            IconButton(onClick = { copyMessage() }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copiar mensaje", tint = Slate400, modifier = Modifier.size(14.dp))
+                            }
+                            IconButton(onClick = onSpeak, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Escuchar", tint = Slate400, modifier = Modifier.size(15.dp))
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.height(4.dp))
