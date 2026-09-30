@@ -35,8 +35,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -121,7 +123,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         /** Cantidad de mensajes recientes inyectados en cada prompt (memoria secuencial barata). */
-        const val CHAT_HISTORY_WINDOW = 12
+        const val CHAT_HISTORY_WINDOW = 20
         private const val CHAT_HISTORY_MAX_CHARS = 320
     }
 
@@ -433,6 +435,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val viaLLM: Boolean
     )
 
+    /** Resultado del sub-agente extractor: puede decidir que el mensaje NO es una orden de agenda. */
+    sealed class TaskExtraction {
+        data class Details(val details: ExtractedTaskDetails) : TaskExtraction()
+        object NotATaskRequest : TaskExtraction()
+        object Unavailable : TaskExtraction()
+    }
+
+    data class NoteDetails(
+        val title: String,
+        val description: String,
+        val category: String // DIRECTIVA, ESPECIFICACION, REPORTE o MEMORIA
+    )
+
+    /**
+     * Preguntas, quejas y seguimientos ("¿sí la agregaste?", "no veo la tarea") NO son órdenes:
+     * deben ir al LLM con historial, nunca ejecutarse como comandos directos.
+     */
+    private fun isInterrogativeOrFollowUp(text: String): Boolean {
+        val t = text.trim()
+        val lower = t.lowercase(Locale.getDefault())
+            .replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+        val imperativeStart = Regex(
+            "^(?:por\\s+favor\\s+)?(?:crea|crear|agrega|agregar|anota|anotar|guarda|guardar|agenda|agendar|agendame|borra|borrar|elimina|eliminar|quita|concluye|concluir|termina|terminar|finaliza|finalizar|completa|completar|marca|pon|reagenda|reprograma|mueve|recuerdame|almacena|almacenar|registra|registrar)\\b"
+        )
+        val isQuestion = t.contains("?") || t.contains("¿")
+        if (isQuestion && !imperativeStart.containsMatchIn(lower)) return true
+        val followUpStarters = listOf(
+            "no veo", "no encuentro", "no aparece", "no aparecio", "no esta", "no se ve",
+            "ya la", "ya lo", "si la", "si lo", "se te paso", "hubo un error",
+            "que pasa con", "donde esta", "donde quedo", "que paso con", "por que no"
+        )
+        return followUpStarters.any { lower.startsWith(it) }
+    }
+
     private fun recentHistoryText(): String {
         val history = _chatMessages.value
             .filter { it.text.isNotBlank() }
@@ -445,9 +481,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } + "\n\n"
     }
 
-    private suspend fun extractTaskDetailsViaLLM(userText: String, activeProject: String, history: String): ExtractedTaskDetails? {
+    private suspend fun extractTaskDetailsViaLLM(userText: String, activeProject: String, history: String): TaskExtraction {
         val systemPrompt = """
             Eres un SUB-AGENTE EXTRACTOR de tareas de un asistente ejecutivo. Recibes el mensaje conversacional del usuario y produces la ficha de lo que pidió agendar.
+
+            REGLA DE CLASIFICACIÓN PREVIA (crítica):
+            - Si el mensaje NO es realmente una solicitud de agendar/crear algo —si es una PREGUNTA, queja, corrección de algo ya hablado o seguimiento ("no veo la tarea", "¿sí la agregaste?", "mejora el título")— responde ÚNICAMENTE: ---NO_ES_TAREA---
+            - Usa el HISTORIAL para decidir: si el usuario se refiere a algo ya platicado pidiendo aclaración, es NO_ES_TAREA.
 
             REGLAS DE TÍTULO (CRÍTICAS):
             - Corto (máximo 8 palabras), técnico y orientado a la acción.
@@ -481,6 +521,67 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lane = ModelLane.REASONING,
             maxTokens = 400
         )
+        if (!result.isSuccess) return TaskExtraction.Unavailable
+        val output = LLMRotator.cleanModelResponse(result.getOrNull().orEmpty())
+        if (output.uppercase(Locale.getDefault()).contains("NO_ES_TAREA")) return TaskExtraction.NotATaskRequest
+
+        fun section(marker: String, next: String): String {
+            val start = output.indexOf(marker)
+            if (start == -1) return ""
+            val from = start + marker.length
+            val end = output.indexOf(next, from).let { if (it == -1) output.length else it }
+            return output.substring(from, end).trim()
+        }
+
+        val title = section("---TITULO---", "---DESCRIPCION---").replace(Regex("^[\"'\\[\\]]+|[\"'\\[\\]]+$"), "").trim()
+        if (title.isBlank() || title.length > 120) return TaskExtraction.Unavailable
+
+        val description = section("---DESCRIPCION---", "---TIPO---").ifBlank { "Agendado desde el asistente conversacional" }
+        val typeRaw = section("---TIPO---", "---PRIORIDAD---").uppercase(Locale.getDefault()).trim()
+        val prioRaw = section("---PRIORIDAD---", "---FECHA---").uppercase(Locale.getDefault()).trim()
+        val fechaText = section("---FECHA---", "---CONFIANZA---").trim()
+        val confRaw = section("---CONFIANZA---", "---FIN---").uppercase(Locale.getDefault()).trim()
+
+        val due = resolveDateTextToTimestamp(fechaText)
+        return TaskExtraction.Details(
+            ExtractedTaskDetails(
+                title = title,
+                description = description,
+                taskType = if (TaskTypes.isValid(typeRaw)) typeRaw else TaskTypes.detect(userText.lowercase(Locale.getDefault())),
+                priority = if (prioRaw in listOf("ALTA", "MEDIA", "BAJA")) prioRaw else "MEDIA",
+                dueTimestamp = due,
+                confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.MEDIA,
+                viaLLM = true
+            )
+        )
+    }
+
+    /** Sub-agente para directivas/especificaciones/reportes: título y descripción inteligentes. */
+    private suspend fun generateNoteDetailsViaLLM(userText: String, activeProject: String, history: String): NoteDetails? {
+        val systemPrompt = """
+            Eres un SUB-AGENTE que convierte indicaciones conversacionales en documentos normativos.
+            El usuario pidió guardar una directiva, lineamiento, especificación o reporte.
+
+            REGLAS:
+            - TÍTULO: corto (máx 8 palabras), técnico y descriptivo del tema. NUNCA frases literales del usuario.
+            - DESCRIPCIÓN: el contenido normativo COMPLETO y bien redactado de lo que se debe cumplir/recordar, en 2-4 líneas. Incluye los detalles específicos (nombres correctos, reglas, convenciones).
+            - CATEGORÍA: DIRECTIVA (regla/convención a cumplir), ESPECIFICACION (requisito técnico), REPORTE (informe/estado), o MEMORIA (apunte general).
+
+            Responde EXACTAMENTE:
+            ---TITULO---
+            [título]
+            ---DESCRIPCION---
+            [descripción completa]
+            ---CATEGORIA---
+            [DIRECTIVA o ESPECIFICACION o REPORTE o MEMORIA]
+        """.trimIndent()
+
+        val result = rotator.executeWithRotation(
+            systemPrompt = systemPrompt,
+            userPrompt = "Proyecto activo: $activeProject\n$history\nMENSAJE DEL USUARIO:\n$userText",
+            lane = ModelLane.REASONING,
+            maxTokens = 400
+        )
         if (!result.isSuccess) return null
         val output = LLMRotator.cleanModelResponse(result.getOrNull().orEmpty())
 
@@ -493,24 +594,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val title = section("---TITULO---", "---DESCRIPCION---").replace(Regex("^[\"'\\[\\]]+|[\"'\\[\\]]+$"), "").trim()
-        if (title.isBlank() || title.length > 120) return null
-
-        val description = section("---DESCRIPCION---", "---TIPO---").ifBlank { "Agendado desde el asistente conversacional" }
-        val typeRaw = section("---TIPO---", "---PRIORIDAD---").uppercase(Locale.getDefault()).trim()
-        val prioRaw = section("---PRIORIDAD---", "---FECHA---").uppercase(Locale.getDefault()).trim()
-        val fechaText = section("---FECHA---", "---CONFIANZA---").trim()
-        val confRaw = section("---CONFIANZA---", "---FIN---").uppercase(Locale.getDefault()).trim()
-
-        val due = resolveDateTextToTimestamp(fechaText)
-        return ExtractedTaskDetails(
+        if (title.isBlank()) return null
+        val description = section("---DESCRIPCION---", "---CATEGORIA---").ifBlank { userText.trim() }
+        val category = section("---CATEGORIA---", "---FIN---").uppercase(Locale.getDefault()).trim()
+        return NoteDetails(
             title = title,
             description = description,
-            taskType = if (TaskTypes.isValid(typeRaw)) typeRaw else TaskTypes.detect(userText.lowercase(Locale.getDefault())),
-            priority = if (prioRaw in listOf("ALTA", "MEDIA", "BAJA")) prioRaw else "MEDIA",
-            dueTimestamp = due,
-            confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.MEDIA,
-            viaLLM = true
+            category = if (category in listOf("DIRECTIVA", "ESPECIFICACION", "REPORTE")) category else "MEMORIA"
         )
+    }
+
+    private fun naiveNoteExtraction(inputText: String): NoteDetails {
+        val lower = inputText.lowercase(Locale.getDefault())
+        val content = inputText.replace(
+            Regex("^(?:por\\s+favor\\s+)?(?:guarde?[ra]?|almacena(?:r)?|registra(?:r)?|anota(?:r)?|crea(?:r)?|agrega(?:r)?)\\s+(?:la\\s+|el\\s+|lo\\s+|esta\\s+|este\\s+|siguiente\\s+)+(?:directiva|directriz|lineamiento|especificaci[oó]n|reporte|nota|informaci[oó]n)?\\s*", RegexOption.IGNORE_CASE),
+            ""
+        ).trim()
+        val category = when {
+            lower.contains("directiva") || lower.contains("directriz") || lower.contains("lineamiento") -> "DIRECTIVA"
+            lower.contains("especificaci") -> "ESPECIFICACION"
+            lower.contains("reporte") -> "REPORTE"
+            else -> "MEMORIA"
+        }
+        val title = content.take(45).trimEnd('.', ':', ',').ifBlank { "Nota de conversación" }
+        return NoteDetails(title = title.replaceFirstChar { it.uppercase(Locale.getDefault()) }, description = inputText.trim(), category = category)
     }
 
     /** Texto natural de fecha -> timestamp SIEMPRE futuro; 0 cuando no hay fecha válida. */
@@ -1062,7 +1169,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                   ---ACTION:RESCHEDULE_TASK|titulo|fechaTexto---
                 - Para concluir tarea: ---ACTION:COMPLETE_TASK|titulo---
                 - Para borrar tarea: ---ACTION:DELETE_TASK|titulo---
-                - Para guardar nota en RAG: ---ACTION:SAVE_NOTE|titulo|contenido---
+                - Para guardar directiva/especificación/reporte/nota en Memoria:
+                  ---ACTION:SAVE_NOTE|titulo|contenido|categoria---
+                  * categoria: DIRECTIVA (regla/convención), ESPECIFICACION (requisito técnico), REPORTE (informe) o MEMORIA (apunte general).
+                  * titulo y contenido deben ser técnicos y bien redactados, nunca frases literales del usuario.
+                - Puedes emitir VARIAS acciones en una misma respuesta (una por línea); todas se ejecutarán.
+                - Si el usuario pregunta si algo fue agendado y NO lo fue (revíalo en el historial), discúlpate brevemente y emite la acción para agendarlo de inmediato.
+                - Si el usuario corrige un nombre o convención, actualiza el título de la tarea correspondiente borrándola y re-creándola con el nombre correcto, y guarda la corrección como DIRECTIVA con SAVE_NOTE.
             """.trimIndent()
         }
 
@@ -1114,21 +1227,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return Triple(finalReply, rotator.resolve()?.modelKey, relevantChunks)
     }
 
+    /**
+     * Ejecuta TODAS las acciones que el modelo emita en una respuesta (pueden ser varias),
+     * con parseo tolerante: acepta "---ACTION:", "ACTION:" o "action:", con o sin guiones,
+     * y nunca muestra el protocolo crudo al usuario.
+     */
     private suspend fun processLLMActions(reply: String, activeProject: String): String {
-        val actionRegex = Regex("---ACTION:([A-Z_]+)\\|(.*?)---")
-        val match = actionRegex.find(reply) ?: return reply
+        val actionLineRegex = Regex("(?i)^-{0,3}\\s*action\\s*:\\s*([a-zA-Z_]+)\\s*\\|(.*)$")
+        val knownActions = setOf("CREATE_TASK", "RESCHEDULE_TASK", "COMPLETE_TASK", "DELETE_TASK", "SAVE_NOTE")
 
-        val actionType = match.groupValues[1]
-        val payload = match.groupValues[2]
-        val cleanReply = reply.replace(match.value, "").trim()
+        val confirmations = StringBuilder()
+        val keptLines = mutableListOf<String>()
 
-        if (activeProject == "Todos") {
-            return cleanReply + "\n\n*(Nota: En modo 'Todos los proyectos' no se aplican modificaciones. Selecciona el proyecto arriba para ejecutar la acción)*"
+        reply.lines().forEach { line ->
+            val trimmed = line.trim()
+            val m = actionLineRegex.find(trimmed)
+            if (m == null || m.groupValues[1].uppercase(Locale.getDefault()) !in knownActions) {
+                keptLines.add(line)
+                return@forEach
+            }
+            val actionType = m.groupValues[1].uppercase(Locale.getDefault())
+            val payload = m.groupValues[2].trim().trimEnd('-').trim()
+            val conf = executeLLMAction(actionType, payload, activeProject)
+            if (conf.isNotBlank()) confirmations.append(conf).append("\n")
         }
 
-        val confirmationText = when (actionType) {
+        val cleanReply = keptLines.joinToString("\n")
+            .replace(Regex("(?m)^\\s*-{3,}\\s*$"), "") // líneas de guiones sueltas
+            .replace(Regex("\\n{3,}"), "\n\n")
+            .trim()
+
+        if (confirmations.isBlank()) return cleanReply
+        return (cleanReply + "\n" + confirmations.toString().trim()).trim()
+    }
+
+    private suspend fun executeLLMAction(actionType: String, payload: String, activeProject: String): String {
+        if (activeProject == "Todos") {
+            return "\n\n*(Nota: En modo 'Todos los proyectos' no se aplican modificaciones. Selecciona el proyecto arriba para ejecutar la acción)*"
+        }
+
+        return when (actionType) {
             "CREATE_TASK" -> {
-                // ---ACTION:CREATE_TASK|titulo|prioridad|fechaTexto|tipo|confianza---
+                // ACTION:CREATE_TASK|titulo|prioridad|fechaTexto|tipo|confianza
                 val parts = payload.split("|")
                 val title = parts.getOrNull(0)?.trim()?.ifBlank { "Nueva tarea" } ?: "Nueva tarea"
                 val priority = parts.getOrNull(1)?.trim()?.uppercase(Locale.getDefault()) ?: "MEDIA"
@@ -1155,7 +1295,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     (if (due <= 0L) " *Sin fecha: pendiente de día y hora.*" else "")
             }
             "RESCHEDULE_TASK" -> {
-                // ---ACTION:RESCHEDULE_TASK|titulo|fechaTexto---
+                // ACTION:RESCHEDULE_TASK|titulo|fechaTexto
                 val parts = payload.split("|")
                 val titleKeyword = parts.getOrNull(0)?.trim()?.lowercase(Locale.getDefault()).orEmpty()
                 val due = resolveDateTextToTimestamp(parts.getOrNull(1))
@@ -1198,23 +1338,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             "SAVE_NOTE" -> {
+                // ACTION:SAVE_NOTE|titulo|contenido|categoria(opcional)
                 val parts = payload.split("|")
                 val title = parts.getOrNull(0)?.trim()?.ifBlank { "Nota de conversación" } ?: "Nota de conversación"
-                val content = parts.getOrNull(1)?.trim() ?: payload
+                val content = parts.getOrNull(1)?.trim()?.ifBlank { payload } ?: payload
+                val catRaw = parts.getOrNull(2)?.trim()?.uppercase(Locale.getDefault()).orEmpty()
+                val category = if (catRaw in listOf("DIRECTIVA", "ESPECIFICACION", "REPORTE")) catRaw else "MEMORIA"
+
                 val doc = DocumentItem(
                     title = title,
                     jobTag = activeProject,
-                    category = "MEMORIA",
+                    category = category,
                     content = content
                 )
                 val docId = db.documentDao().insertDocument(doc)
                 ragEngine.indexContent(docId, "DOCUMENT", title, activeProject, content)
-                "\n\n💾 *[Acción ejecutada: Nota guardada y vectorizada en memoria RAG de $activeProject]*"
+                val catLabel = when (category) {
+                    "DIRECTIVA" -> "Directiva"
+                    "ESPECIFICACION" -> "Especificación"
+                    "REPORTE" -> "Reporte"
+                    else -> "Nota"
+                }
+                "\n\n💾 *[Acción ejecutada: $catLabel \"$title\" guardada en Memoria de $activeProject]*"
             }
             else -> ""
         }
-
-        return (cleanReply + confirmationText).trim()
     }
 
     private fun isWriteOrModifyIntent(text: String): Boolean {
@@ -1233,6 +1381,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun tryExecuteConversationalCommand(inputText: String, activeProject: String): String? {
         val lower = inputText.trim().lowercase(Locale.getDefault())
+
+        // 0. Preguntas, quejas y seguimientos NUNCA se ejecutan como comandos: van al LLM con historial
+        if (isInterrogativeOrFollowUp(inputText)) return null
 
         // 1. Concluir / Terminar / Finalizar Tarea
         val isCompleteIntent = (lower.contains("conclu") || lower.contains("termina") || lower.contains("finaliz") || lower.contains("complet") || lower.contains("hecho")) &&
@@ -1333,12 +1484,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (isCreateTaskIntent && activeProject != "Todos") {
             // SUB-AGENTE EXTRACTOR: título técnico no literal + tipo + prioridad + fecha + confianza
             val history = recentHistoryText()
-            val extracted = try {
+            val extraction = try {
                 extractTaskDetailsViaLLM(inputText, activeProject, history)
             } catch (t: Throwable) {
                 android.util.Log.e("MainViewModel", "extractTaskDetails error: ${t.message}", t)
-                null
-            } ?: naiveTaskExtraction(inputText, activeProject)
+                TaskExtraction.Unavailable
+            }
+            // El sub-agente determinó que no es una orden de agenda: que responda el LLM con contexto
+            if (extraction is TaskExtraction.NotATaskRequest) return null
+
+            val extracted = (extraction as? TaskExtraction.Details)?.details
+                ?: naiveTaskExtraction(inputText, activeProject)
 
             val task = WorkTask(
                 title = extracted.title,
@@ -1381,32 +1537,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "\n\nGuardada en tu agenda y vectorizada en memoria RAG."
         }
 
-        // 4. Guardar información / Nota / Directriz / Acuerdo en RAG
-        val isStoreInfoIntent = (lower.contains("almacena") || lower.contains("almacenar") ||
-            lower.contains("guarda esta información") || lower.contains("guarda la información") ||
-            lower.contains("guarda esta nota") || lower.contains("guarda este acuerdo") ||
-            lower.contains("registra esta información") || lower.contains("guarda este resumen") ||
-            lower.contains("anota esta información") || lower.contains("guarda esta directriz"))
+        // 5. Guardar directivas / especificaciones / reportes / notas en la Memoria del proyecto
+        val storeVerbs = listOf("guarda", "guardar", "almacena", "almacenar", "registra", "registrar", "anota", "anotar", "crea", "crear", "agrega", "agregar")
+        val storeNouns = listOf(
+            "directiva", "directriz", "lineamiento", "especificaci", "reporte", "nota",
+            "informaci", "acuerdo", "resumen", "siguiente", "esta ", "este "
+        )
+        val isStoreInfoIntent = storeVerbs.any { lower.contains(it) } && storeNouns.any { lower.contains(it) }
 
         if (isStoreInfoIntent && activeProject != "Todos") {
-            val cleanContent = inputText.replace(Regex("^(?:por\\s+favor\\s+)?(?:almacena(?:r)?|guarda(?:r)?|registra(?:r)?|anota(?:r)?)\\s+(?:esta\\s+|la\\s+)?(?:información|info|nota|acuerdo|directriz)?\\s*[:\\-]?\\s*", RegexOption.IGNORE_CASE), "").trim()
-            val type = if (lower.contains("directriz") || lower.contains("lineamiento")) "DIRECTIVA"
-                       else if (lower.contains("junta") || lower.contains("reunión") || lower.contains("acuerdo")) "JUNTA"
-                       else "MEMORIA"
+            // SUB-AGENTE: título y descripción inteligentes + categoría correcta
+            val note = try {
+                generateNoteDetailsViaLLM(inputText, activeProject, recentHistoryText())
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "generateNoteDetails error: ${t.message}", t)
+                null
+            } ?: naiveNoteExtraction(inputText)
 
-            val previewTitle = cleanContent.take(45).trimEnd('.', ':', ',').ifBlank { "Nota informativa" }
             val doc = DocumentItem(
-                title = previewTitle,
+                title = note.title,
                 jobTag = activeProject,
-                category = type,
-                content = inputText.trim()
+                category = note.category,
+                content = note.description
             )
             val docId = db.documentDao().insertDocument(doc)
             ragEngine.indexContent(docId, "DOCUMENT", doc.title, activeProject, doc.content)
-            return "💾 **Información Guardada en $activeProject:**\n\"$previewTitle\"\n\nAlmacenada y vectorizada en memoria RAG bajo este proyecto."
+
+            val catLabel = when (note.category) {
+                "DIRECTIVA" -> "Directiva"
+                "ESPECIFICACION" -> "Especificación"
+                "REPORTE" -> "Reporte"
+                else -> "Nota"
+            }
+            return "💾 **$catLabel guardada en $activeProject:**\n" +
+                "• **Título:** ${note.title}\n" +
+                "• **Categoría:** $catLabel\n\n" +
+                "Ya está disponible en la sección **Memoria** bajo el proyecto **$activeProject**, vectorizada en RAG."
         }
 
-        // 5. Consultar proyectos existentes
+        // 6. Consultar proyectos existentes
         if (lower.contains("qué proyectos") || lower.contains("que proyectos") ||
             lower.contains("cuáles son mis proyectos") || lower.contains("cuales son mis proyectos") ||
             lower.contains("mis trabajos") || lower.contains("cuáles proyectos") || lower.contains("cuales proyectos")) {
@@ -1553,6 +1722,122 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val ip = webhookServer.getLocalIpAddress()
         val zip = ChromeExtensionExporter.generateExtensionZip(context, ip, port = 8765)
         ChromeExtensionExporter.shareExtensionZip(context, zip)
+    }
+
+    // --- Respaldo completo (Backup) ---
+    fun backupFileName(): String =
+        "neox-admin-backup-" + SimpleDateFormat("yyyyMMdd-HHmm", Locale.getDefault()).format(Date()) + ".json"
+
+    private val _backupResult = MutableStateFlow<String?>(null)
+    val backupResult: StateFlow<String?> = _backupResult.asStateFlow()
+
+    fun clearBackupResult() { _backupResult.value = null }
+
+    /** JSON con TODO: proyectos, tareas, juntas, bóveda, memoria, conversaciones y config del rotador (incluye API keys). */
+    suspend fun buildBackupJson(): String = withContext(Dispatchers.IO) {
+        try {
+            val root = JSONObject()
+            root.put("app", "Neox Admin")
+            root.put("schemaVersion", 1)
+            root.put("exportedAt", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault()).format(Date()))
+
+            val jobs = db.jobProjectDao().getAllJobsSync()
+            root.put("proyectos", JSONArray(jobs.map { j ->
+                JSONObject()
+                    .put("name", j.name).put("companyOrClient", j.companyOrClient)
+                    .put("colorHex", j.colorHex).put("isPrimary", j.isPrimary).put("createdAt", j.createdAt)
+            }))
+
+            val tasks = db.taskDao().getAllTasksSync()
+            root.put("tareas", JSONArray(tasks.map { t ->
+                JSONObject()
+                    .put("title", t.title).put("description", t.description).put("jobTag", t.jobTag)
+                    .put("dueTimestamp", t.dueTimestamp).put("priority", t.priority).put("taskType", t.taskType)
+                    .put("confidence", t.confidence).put("isCompleted", t.isCompleted).put("status", t.status)
+                    .put("originReference", t.originReference).put("createdAt", t.createdAt)
+            }))
+
+            val meetings = db.meetingDao().getAllMeetings().first()
+            root.put("juntas", JSONArray(meetings.map { m ->
+                JSONObject()
+                    .put("title", m.title).put("jobTag", m.jobTag).put("dateTimestamp", m.dateTimestamp)
+                    .put("executiveSummary", m.executiveSummary).put("myActionItems", m.myActionItems)
+                    .put("othersActionItems", m.othersActionItems).put("keyDecisions", m.keyDecisions)
+                    .put("rawTranscript", m.rawTranscript).put("quotesJson", m.quotesJson)
+                    .put("isConcluded", m.isConcluded)
+            }))
+
+            val docs = db.documentDao().getAllDocuments().first()
+            root.put("memoria", JSONArray(docs.map { d ->
+                JSONObject()
+                    .put("title", d.title).put("jobTag", d.jobTag).put("category", d.category)
+                    .put("content", d.content).put("createdAt", d.createdAt)
+            }))
+
+            val vault = db.vaultDao().getAllVaultEntries().first()
+            root.put("boveda", JSONArray(vault.map { v ->
+                JSONObject()
+                    .put("title", v.title).put("rawContent", v.rawContent).put("sourceType", v.sourceType)
+                    .put("jobTag", v.jobTag).put("timestamp", v.timestamp)
+            }))
+
+            val sessions = db.conversationDao().getAllSessionsSync()
+            val conversations = JSONArray()
+            sessions.forEach { s ->
+                val msgs = db.chatMsgDao().getMessagesSync(s.id)
+                conversations.put(
+                    JSONObject()
+                        .put("title", s.title).put("jobTag", s.jobTag)
+                        .put("createdAt", s.createdAt).put("lastActiveAt", s.lastActiveAt)
+                        .put("messages", JSONArray(msgs.map { msg ->
+                            JSONObject()
+                                .put("sender", msg.sender).put("text", msg.text)
+                                .put("modelUsed", msg.modelUsed ?: JSONObject.NULL).put("timestamp", msg.timestamp)
+                        }))
+                )
+            }
+            root.put("conversaciones", conversations)
+
+            val cfg = rotator.config
+            root.put("rotador", JSONObject()
+                .put("enabled", cfg.enabled)
+                .put("openRouterApiKey", cfg.openRouterApiKey)
+                .put("nvidiaApiKey", cfg.nvidiaApiKey)
+                .put("localhostEnabled", cfg.localhostEnabled)
+                .put("localhostUrl", cfg.localhostUrl)
+                .put("localhostModelId", cfg.localhostModelId)
+                .put("primaryProvider", cfg.primaryProvider)
+                .put("fallbackProvider", cfg.fallbackProvider)
+                .put("activeProviderMode", cfg.activeProviderMode)
+                .put("defaultCooldownMinutes", cfg.defaultCooldownMinutes)
+                .put("deadModelCooldownHours", cfg.deadModelCooldownHours))
+
+            root.put("preferencias", JSONObject()
+                .put("retentionDays", prefs.getRetentionDays())
+                .put("ttsRate", prefs.getTtsRate().toDouble())
+                .put("ttsPitch", prefs.getTtsPitch().toDouble())
+                .put("ttsVoiceName", prefs.getTtsVoiceName()))
+
+            root.toString(2)
+        } catch (t: Throwable) {
+            android.util.Log.e("MainViewModel", "buildBackupJson error: ${t.message}", t)
+            "{}"
+        }
+    }
+
+    fun writeBackupTo(context: Context, uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val json = buildBackupJson()
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(json.toByteArray(Charsets.UTF_8))
+                }
+                _backupResult.value = "✅ Respaldo descargado correctamente"
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "writeBackupTo error: ${t.message}", t)
+                _backupResult.value = "❌ Error al generar el respaldo: ${t.message}"
+            }
+        }
     }
 
     fun exportDailyReport(context: Context) {

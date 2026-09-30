@@ -112,7 +112,7 @@ import java.util.Locale
 enum class AgendaViewTab(val label: String, val icon: ImageVector) {
     LIST("Lista y Filtros", Icons.Default.ViewList),
     CALENDAR("Calendario", Icons.Default.CalendarMonth),
-    DIAGRAM("Tablero Kanban", Icons.Default.ViewKanban)
+    DIAGRAM("Tablero", Icons.Default.ViewKanban)
 }
 
 enum class DateFilterType(val label: String) {

@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -82,6 +83,7 @@ import com.example.ui.screens.MeetingsVaultScreen
 import com.example.ui.screens.RotatorStatusScreen
 import com.example.ui.screens.SecurityLockScreen
 import com.example.ui.screens.SecuritySettingsDialog
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.RoseError
@@ -96,8 +98,7 @@ enum class NavigationTab(val label: String, val icon: ImageVector) {
     MEETINGS("Juntas", Icons.Default.Mic),
     ASSISTANT("Asistente", Icons.Default.Chat),
     KNOWLEDGE("Memoria", Icons.Default.Folder),
-    ROTATOR("Rotador", Icons.AutoMirrored.Filled.RotateRight),
-    BRIDGE("Wi-Fi PC", Icons.Default.Laptop)
+    CONFIG("Configuración", Icons.Default.Settings)
 }
 
 class MainActivity : ComponentActivity() {
@@ -261,8 +262,7 @@ class MainActivity : ComponentActivity() {
                                     NavigationTab.MEETINGS -> MeetingsVaultScreen(viewModel = viewModel)
                                     NavigationTab.ASSISTANT -> ChatAssistantScreen(viewModel = viewModel)
                                     NavigationTab.KNOWLEDGE -> KnowledgeRagScreen(viewModel = viewModel)
-                                    NavigationTab.ROTATOR -> RotatorStatusScreen(viewModel = viewModel)
-                                    NavigationTab.BRIDGE -> DesktopBridgeScreen(viewModel = viewModel)
+                                    NavigationTab.CONFIG -> SettingsScreen(viewModel = viewModel)
                                 }
                             }
                         }
@@ -358,31 +358,53 @@ fun ProjectsManagementDialog(
         onDismissRequest = onDismiss,
         containerColor = Slate900,
         title = {
-            Text("Configurar Mis Trabajos / Proyectos", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(CyanNeon.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Folder, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp))
+                }
+                Column {
+                    Text("Mis Trabajos / Proyectos", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text("${jobs.size} registrados · etiquetan tareas, notas y chats", color = Slate400, fontSize = 10.sp)
+                }
+            }
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "Agrega tus trabajos o proyectos para etiquetar tus notas y tareas personalizadas:",
-                    color = Slate400,
-                    fontSize = 12.sp
-                )
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Alta de proyecto
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Nuevo proyecto:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     OutlinedTextField(
                         value = newProjectName,
                         onValueChange = { newProjectName = it },
-                        placeholder = { Text("Nombre del Trabajo", color = Slate700, fontSize = 12.sp) },
-                        modifier = Modifier.weight(1f),
+                        label = { Text("Nombre del trabajo *", color = Slate400, fontSize = 12.sp) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
                             focusedBorderColor = CyanNeon,
                             unfocusedBorderColor = Slate700
-                        )
+                        ),
+                        modifier = Modifier.fillMaxWidth()
                     )
-
+                    OutlinedTextField(
+                        value = newProjectClient,
+                        onValueChange = { newProjectClient = it },
+                        label = { Text("Empresa o cliente (opcional)", color = Slate400, fontSize = 12.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = CyanNeon,
+                            unfocusedBorderColor = Slate700
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     Button(
                         onClick = {
                             if (newProjectName.isNotBlank()) {
@@ -391,34 +413,64 @@ fun ProjectsManagementDialog(
                                 newProjectClient = ""
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
+                        enabled = newProjectName.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "Agregar")
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Agregar proyecto", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text("Proyectos Registrados:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-
-                LazyColumn(modifier = Modifier.fillMaxWidth().height(160.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Listado
+                Text("Proyectos registrados:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().height(180.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     items(jobs, key = { it.id }) { job ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(Slate800)
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
-                                Text(job.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                                if (job.companyOrClient.isNotBlank()) {
-                                    Text(job.companyOrClient, color = Slate400, fontSize = 10.sp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(parseColorSafe(job.colorHex))
+                                )
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(job.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                        if (job.isPrimary) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(CyanNeon.copy(alpha = 0.15f))
+                                                    .padding(horizontal = 5.dp, vertical = 1.dp)
+                                            ) {
+                                                Text("Principal", color = CyanNeon, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                    if (job.companyOrClient.isNotBlank()) {
+                                        Text(job.companyOrClient, color = Slate400, fontSize = 10.sp)
+                                    }
                                 }
                             }
-                            IconButton(onClick = { viewModel.deleteProject(job) }, modifier = Modifier.size(24.dp)) {
+                            IconButton(onClick = { viewModel.deleteProject(job) }, modifier = Modifier.size(26.dp)) {
                                 Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = RoseError, modifier = Modifier.size(16.dp))
                             }
                         }
@@ -429,10 +481,17 @@ fun ProjectsManagementDialog(
         confirmButton = {
             Button(
                 onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
+                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                shape = RoundedCornerShape(10.dp)
             ) {
                 Text("Listo", fontWeight = FontWeight.Bold)
             }
         }
     )
+}
+
+private fun parseColorSafe(hex: String): Color = try {
+    Color(android.graphics.Color.parseColor(hex))
+} catch (_: Exception) {
+    CyanNeon
 }

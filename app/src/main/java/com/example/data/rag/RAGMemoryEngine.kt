@@ -98,13 +98,15 @@ class RAGMemoryEngine(private val memoryDao: MemoryDao) {
     }
 
     /**
-     * Vector Space RAG Retrieval using TF-IDF + Cosine Similarity & Keyword Boost.
-     * Dramatically reduces tokens by returning only top-K relevant chunks with exact citations.
+     * Vector Space RAG Retrieval usando TF-IDF + Cosine Similarity, Keyword Boost y
+     * Boost de Recencia (los elementos más recientes ganan ante empates: si algo se dijo
+     * distinto hace 20 días y hace 5 días, pesa más lo reciente).
      */
     suspend fun queryMemory(query: String, topK: Int = 4, jobFilter: String? = null): List<RAGQueryResult> = withContext(Dispatchers.Default) {
         val queryTokens = tokenize(query)
         if (queryTokens.isEmpty()) return@withContext emptyList()
 
+        val nowMs = System.currentTimeMillis()
         val rawChunks = memoryDao.getAllChunksList()
         val allChunks = if (!jobFilter.isNullOrBlank() && jobFilter != "Todos") {
             rawChunks.filter { it.jobTag.equals(jobFilter, ignoreCase = true) }
@@ -182,6 +184,10 @@ class RAGMemoryEngine(private val memoryDao: MemoryDao) {
             if (chunk.jobTag.lowercase(Locale.ROOT).contains(queryLower)) {
                 cosineSim += 0.20
             }
+
+            // Recency boost: decae exponencialmente con la antigüedad (vida media ~10 días)
+            val ageDays = ((nowMs - chunk.timestamp).coerceAtLeast(0L)) / 86_400_000.0
+            cosineSim += 0.30 * kotlin.math.exp(-ageDays / 10.0)
 
             if (cosineSim > 0.05) {
                 val formattedCitation = "[Ref: ${chunk.sourceType} \"${chunk.title}\" (${chunk.dateString}) | Proyecto: ${chunk.jobTag}] \"${chunk.exactQuote}\""
