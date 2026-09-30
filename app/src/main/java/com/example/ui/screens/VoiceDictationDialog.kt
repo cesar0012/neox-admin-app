@@ -71,6 +71,9 @@ import com.example.ui.theme.Slate900
  * RECOGNIZER_BUSY...) se destruye la instancia y se crea otra tras un pequeño backoff.
  * Así la sesión de dictado nunca muere: el usuario puede pausar todo lo que quiera
  * y solo se envía con el botón Enviar.
+ *
+ * Conservación de texto: si una sesión muere SIN resultados (corte por silencio), el
+ * último parcial se promueve a texto firme para que la siguiente sesión nunca lo borre.
  */
 private class DictationController(private val context: Context, private val handler: Handler) {
 
@@ -78,10 +81,13 @@ private class DictationController(private val context: Context, private val hand
     var onListeningChange: ((Boolean) -> Unit)? = null
     var onPartial: ((String) -> Unit)? = null
     var onFinal: ((String) -> Unit)? = null
+    /** La sesión terminó sin resultados oficiales: conserva el parcial antes de reiniciar. */
+    var onSessionAborted: (() -> Unit)? = null
     var onUnavailable: (() -> Unit)? = null
 
     private var recognizer: SpeechRecognizer? = null
     private var backoffSteps = 0 // evita bucles agresivos cuando hay silencio prolongado
+    private var sessionDeliveredResults = false
 
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) { onListeningChange?.invoke(true) }
@@ -93,11 +99,14 @@ private class DictationController(private val context: Context, private val hand
         override fun onError(error: Int) {
             onListeningChange?.invoke(false)
             if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) return
+            // Corte por pausa/silencio sin resultados: conservar lo hablado como texto firme
+            if (!sessionDeliveredResults) onSessionAborted?.invoke()
             // Cualquier otro error (timeout por pausa, NO_MATCH, CLIENT, BUSY...) reinicia sesión
             scheduleRestart()
         }
 
         override fun onResults(results: Bundle?) {
+            sessionDeliveredResults = true
             onListeningChange?.invoke(false)
             val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             val text = list?.firstOrNull()?.trim().orEmpty()
@@ -151,6 +160,7 @@ private class DictationController(private val context: Context, private val hand
             return
         }
         destroySession()
+        sessionDeliveredResults = false
         try {
             val r = SpeechRecognizer.createSpeechRecognizer(context)
             recognizer = r
@@ -216,13 +226,32 @@ fun VoiceDictationDialog(
         DictationController(context.applicationContext, Handler(Looper.getMainLooper()))
     }
 
+    // Unión de segmentos SIEMPRE con espacio (nunca "proyectoel") y sin duplicar texto
+    fun appendSegment(current: String, segment: String): String {
+        val seg = segment.trim()
+        if (seg.isEmpty()) return current
+        if (current.isBlank()) return seg
+        // Evita duplicados si el final repite el final del texto ya acumulado
+        if (current.endsWith(seg, ignoreCase = true)) return current
+        if (current.length > seg.length && current.endsWith(" $seg")) return current
+        return current.trim() + " " + seg
+    }
+
     DisposableEffect(controller, hasPermission) {
         if (hasPermission) {
             controller.onListeningChange = { listening -> isListening = listening }
             controller.onPartial = { p -> partialText = p }
             controller.onFinal = { f ->
-                finalizedText = if (finalizedText.isBlank()) f else (finalizedText + " " + f)
+                // El resultado oficial incluye lo hablado en la sesión; sustituye al parcial
+                finalizedText = appendSegment(finalizedText, f)
                 partialText = ""
+            }
+            controller.onSessionAborted = {
+                // La sesión murió por pausa/silencio sin resultados: el parcial se vuelve firme
+                if (partialText.isNotBlank()) {
+                    finalizedText = appendSegment(finalizedText, partialText)
+                    partialText = ""
+                }
             }
             controller.onUnavailable = { engineAvailable = false }
             controller.start()
@@ -232,6 +261,7 @@ fun VoiceDictationDialog(
             controller.onListeningChange = null
             controller.onPartial = null
             controller.onFinal = null
+            controller.onSessionAborted = null
             controller.onUnavailable = null
         }
     }

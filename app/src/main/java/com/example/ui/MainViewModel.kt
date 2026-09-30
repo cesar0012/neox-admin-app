@@ -224,6 +224,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _assistantSelectedProject.value = project
     }
 
+    // Banner informativo del asistente: solo la primera vez; se puede reabrir con el botón ?
+    private val _assistantBannerSeen = MutableStateFlow(prefs.isAssistantBannerSeen())
+    val assistantBannerSeen: StateFlow<Boolean> = _assistantBannerSeen.asStateFlow()
+
+    fun markAssistantBannerSeen() {
+        prefs.setAssistantBannerSeen(true)
+        _assistantBannerSeen.value = true
+    }
+
     // Meeting capture state
     private val _isMeetingProcessing = MutableStateFlow(false)
     val isMeetingProcessing: StateFlow<Boolean> = _isMeetingProcessing.asStateFlow()

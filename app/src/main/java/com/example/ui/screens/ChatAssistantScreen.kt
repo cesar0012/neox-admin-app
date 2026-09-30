@@ -23,15 +23,17 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Tune
@@ -62,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -91,6 +94,7 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
     var autoSpeakEnabled by remember { mutableStateOf(true) }
     var showTtsSettings by remember { mutableStateOf(false) }
     var showDictation by remember { mutableStateOf(false) }
+    var bannerOverride by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size) {
@@ -100,32 +104,58 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
     }
 
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // Project Selector & Scope Delimiter Bar (Same design as Meetings & Agenda)
+        // ─────────────────── Barra superior del Asistente ───────────────────
+        val bannerSeen by viewModel.assistantBannerSeen.collectAsStateWithLifecycle()
+        val amber = Color(0xFFF59E0B)
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Slate900)
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
+            // Toolbar: identidad + acciones rápidas
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Ámbito del Asistente:",
-                    color = Slate400,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(CyanNeon.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.SmartToy, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp))
+                    }
+                    Column {
+                        Text("Neox Asistente", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = when {
+                                isProcessing -> "Procesando tu mensaje..."
+                                assistantProject == "Todos" -> "Análisis global de todos tus proyectos"
+                                else -> "Trabajando en: $assistantProject"
+                            },
+                            color = Slate400,
+                            fontSize = 9.sp,
+                            maxLines = 1
+                        )
+                    }
+                }
 
-                // Voice Response Status Pill
+                // Toggle de voz
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (autoSpeakEnabled) CyanNeon.copy(alpha = 0.15f) else Slate800)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (autoSpeakEnabled) CyanNeon.copy(alpha = 0.16f) else Slate800)
+                        .border(1.dp, if (autoSpeakEnabled) CyanNeon else Slate700, RoundedCornerShape(20.dp))
                         .clickable { autoSpeakEnabled = !autoSpeakEnabled }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                         .testTag("voice_response_toggle")
                 ) {
                     Row(
@@ -136,21 +166,59 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                             if (autoSpeakEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.VolumeMute,
                             contentDescription = "Voz",
                             tint = if (autoSpeakEnabled) CyanNeon else Slate400,
-                            modifier = Modifier.size(13.dp)
+                            modifier = Modifier.size(14.dp)
                         )
                         Text(
-                            text = if (autoSpeakEnabled) "Voz ON" else "Voz OFF",
+                            text = if (autoSpeakEnabled) "Voz" else "Silencio",
                             color = if (autoSpeakEnabled) CyanNeon else Slate400,
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                ToolbarIconButton(Icons.Default.Add, "Nueva conversación", CyanNeon) { viewModel.startNewSession() }
+                ToolbarIconButton(Icons.Default.Tune, "Ajustes de voz", CyanNeon) { showTtsSettings = true }
+                ToolbarIconButton(
+                    Icons.Default.HelpOutline,
+                    "Información del ámbito y la conversación",
+                    Slate400
+                ) { bannerOverride = !bannerOverride }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Barra de sesiones de conversación (temas/proyectos separados) + ajustes de voz
+            // Selector de proyecto (chips)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                item {
+                    AssistantChip(
+                        text = "Todos",
+                        icon = Icons.Default.Shield,
+                        selected = assistantProject == "Todos",
+                        accent = amber,
+                        onAccent = Color(0xFF1F1400),
+                        onClick = { viewModel.setAssistantProject("Todos") }
+                    )
+                }
+
+                val projectNames = if (jobs.isEmpty()) listOf("Trabajo Principal") else jobs.map { it.name }
+                items(projectNames) { pName ->
+                    AssistantChip(
+                        text = pName,
+                        icon = Icons.Default.Folder,
+                        selected = assistantProject == pName,
+                        accent = CyanNeon,
+                        onAccent = Color(0xFF00363D),
+                        onClick = { viewModel.setAssistantProject(pName) }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Selector de conversación (temas separados y persistidos)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -158,6 +226,8 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
             ) {
                 var sessionMenuOpen by remember { mutableStateOf(false) }
                 val currentSession = sessions.firstOrNull { it.id == activeSessionId }
+
+                Text("En:", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
 
                 Box {
                     Box(
@@ -169,10 +239,10 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(Icons.Default.SmartToy, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(13.dp))
+                            Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(12.dp))
                             Text(
-                                text = currentSession?.title?.take(24) ?: "Conversación",
-                                color = Slate400,
+                                text = currentSession?.title?.take(28) ?: "Conversación",
+                                color = Color.White,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1
@@ -214,108 +284,93 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                     }
                 }
 
-                IconButton(onClick = { viewModel.startNewSession() }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Add, contentDescription = "Nueva conversación", tint = CyanNeon, modifier = Modifier.size(16.dp))
-                }
-
                 Spacer(modifier = Modifier.weight(1f))
 
-                IconButton(onClick = { showTtsSettings = true }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Tune, contentDescription = "Ajustes de voz", tint = CyanNeon, modifier = Modifier.size(16.dp))
-                }
+                Text(
+                    text = "${sessions.size} conversación" + if (sessions.size == 1) "" else "es",
+                    color = Slate700,
+                    fontSize = 9.sp
+                )
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            // Banner informativo: solo la primera vez; se re-abre con el botón ?
+            if (!bannerSeen || bannerOverride) {
+                val isTodos = assistantProject == "Todos"
+                val accent = if (isTodos) amber else CyanNeon
 
-            // Project Selector Chips
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item {
-                    val isSelected = assistantProject == "Todos"
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (isSelected) Color(0xFFF59E0B) else Slate800)
-                            .border(1.dp, if (isSelected) Color(0xFFF59E0B) else Slate700, RoundedCornerShape(16.dp))
-                            .clickable { viewModel.setAssistantProject("Todos") }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(accent.copy(alpha = 0.08f))
+                        .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    if (isTodos) Icons.Default.Shield else Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = accent,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = if (isTodos) "Modo 'Todos los proyectos' protegido" else "Proyecto activo: $assistantProject",
+                                    color = accent,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                             Icon(
-                                Icons.Default.Shield,
-                                contentDescription = null,
-                                tint = if (isSelected) Color.Black else Color(0xFFF59E0B),
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                text = "Todos los Proyectos",
-                                color = if (isSelected) Color.Black else Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                Icons.Default.Close,
+                                contentDescription = "Ocultar información",
+                                tint = Slate400,
+                                modifier = Modifier
+                                    .size(15.dp)
+                                    .clickable {
+                                        viewModel.markAssistantBannerSeen()
+                                        bannerOverride = false
+                                    }
                             )
                         }
-                    }
-                }
 
-                val projectNames = if (jobs.isEmpty()) listOf("Trabajo Principal") else jobs.map { it.name }
-                items(projectNames) { pName ->
-                    val isSelected = assistantProject == pName
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (isSelected) CyanNeon else Slate800)
-                            .border(1.dp, if (isSelected) CyanNeon else Slate700, RoundedCornerShape(16.dp))
-                            .clickable { viewModel.setAssistantProject(pName) }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
+                        Spacer(modifier = Modifier.height(4.dp))
+
                         Text(
-                            text = pName,
-                            color = if (isSelected) Color(0xFF00363D) else Slate400,
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Protection / Project Scope Notice Banner
-            if (assistantProject == "Todos") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFF261E0A))
-                        .border(1.dp, Color(0xFF855D0A), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(Icons.Default.Shield, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(14.dp))
-                        Text(
-                            text = "Modo Protegido: Solo consulta general y análisis global. Para guardar, agendar o concluir tareas selecciona un proyecto arriba.",
-                            color = Color(0xFFFDE68A),
+                            text = if (isTodos) {
+                                "Aquí solo se permite consulta y análisis global de tus proyectos. Para guardar, agendar, editar o borrar algo, selecciona arriba el proyecto específico."
+                            } else {
+                                "Tus instrucciones directas (\"guarda esta tarea\", \"agenda una junta el viernes\", \"concluye esta tarea\") se aplican a este proyecto. Cambia de conversación abajo si quieres separar temas."
+                            },
+                            color = Slate400,
                             fontSize = 10.sp,
-                            lineHeight = 13.sp
+                            lineHeight = 14.sp
                         )
-                    }
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFF002229))
-                        .border(1.dp, CyanNeon.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(14.dp))
-                        Text(
-                            text = "Proyecto Activo: $assistantProject — Instrucciones directas ('guarda esta tarea', 'concluye esta tarea', 'borra esta tarea') se aplican a este proyecto.",
-                            color = CyanNeon,
-                            fontSize = 10.sp,
-                            lineHeight = 13.sp
-                        )
+
+                        if (!bannerSeen) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        viewModel.markAssistantBannerSeen()
+                                        bannerOverride = false
+                                    }
+                                ) {
+                                    Text("Entendido", color = accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -589,6 +644,56 @@ private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
             }) { Text("Cancelar", color = Slate400) }
         }
     )
+}
+
+@Composable
+private fun ToolbarIconButton(icon: ImageVector, description: String, tint: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(Slate800)
+            .border(1.dp, Slate700, CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(16.dp))
+    }
+}
+
+@Composable
+private fun AssistantChip(
+    text: String,
+    icon: ImageVector,
+    selected: Boolean,
+    accent: Color,
+    onAccent: Color,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (selected) accent else Slate800)
+            .border(1.dp, if (selected) accent else Slate700, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (selected) onAccent else accent,
+            modifier = Modifier.size(13.dp)
+        )
+        Text(
+            text = text,
+            color = if (selected) onAccent else Slate400,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1
+        )
+    }
 }
 
 @Composable

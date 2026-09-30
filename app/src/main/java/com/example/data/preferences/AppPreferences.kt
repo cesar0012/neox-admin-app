@@ -54,4 +54,11 @@ class AppPreferences(context: Context) {
     fun setTtsVoiceName(name: String) {
         prefs.edit().putString("tts_voice_name", name).apply()
     }
+
+    // --- Banner informativo del asistente (solo se muestra la primera vez) ---
+    fun isAssistantBannerSeen(): Boolean = prefs.getBoolean("assistant_banner_seen", false)
+
+    fun setAssistantBannerSeen(seen: Boolean) {
+        prefs.edit().putBoolean("assistant_banner_seen", seen).apply()
+    }
 }
