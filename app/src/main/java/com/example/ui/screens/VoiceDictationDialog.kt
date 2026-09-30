@@ -13,6 +13,8 @@ import android.speech.SpeechRecognizer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,38 +24,45 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Send
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.data.speech.SpeechContextPolisher
 import com.example.ui.theme.AmberWarning
@@ -62,18 +71,15 @@ import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
+import com.example.ui.theme.Slate950
+import kotlinx.coroutines.delay
 
 /**
- * Controlador de reconocimiento continuo.
+ * Controlador de reconocimiento continuo (emisor puro de segmentos, sin estado de texto).
  *
  * Estrategia anti-cortes: cada segmento de dictado corre en una instancia NUEVA de
- * SpeechRecognizer. Al terminar (resultados) o fallar (timeout, NO_MATCH, ERROR_CLIENT,
- * RECOGNIZER_BUSY...) se destruye la instancia y se crea otra tras un pequeño backoff.
- * Así la sesión de dictado nunca muere: el usuario puede pausar todo lo que quiera
- * y solo se envía con el botón Enviar.
- *
- * Conservación de texto: si una sesión muere SIN resultados (corte por silencio), el
- * último parcial se promueve a texto firme para que la siguiente sesión nunca lo borre.
+ * SpeechRecognizer; al terminar o fallar se destruye y se crea otra tras un backoff.
+ * La sesión de dictado nunca muere: el usuario puede pausar todo lo que quiera.
  */
 private class DictationController(private val context: Context, private val handler: Handler) {
 
@@ -83,16 +89,17 @@ private class DictationController(private val context: Context, private val hand
     var onFinal: ((String) -> Unit)? = null
     /** La sesión terminó sin resultados oficiales: conserva el parcial antes de reiniciar. */
     var onSessionAborted: (() -> Unit)? = null
+    var onRms: ((Float) -> Unit)? = null
     var onUnavailable: (() -> Unit)? = null
 
     private var recognizer: SpeechRecognizer? = null
-    private var backoffSteps = 0 // evita bucles agresivos cuando hay silencio prolongado
+    private var backoffSteps = 0
     private var sessionDeliveredResults = false
 
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) { onListeningChange?.invoke(true) }
         override fun onBeginningOfSpeech() { backoffSteps = 0; onListeningChange?.invoke(true) }
-        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onRmsChanged(rmsdB: Float) { onRms?.invoke(rmsdB) }
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() { onListeningChange?.invoke(false) }
 
@@ -101,7 +108,6 @@ private class DictationController(private val context: Context, private val hand
             if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) return
             // Corte por pausa/silencio sin resultados: conservar lo hablado como texto firme
             if (!sessionDeliveredResults) onSessionAborted?.invoke()
-            // Cualquier otro error (timeout por pausa, NO_MATCH, CLIENT, BUSY...) reinicia sesión
             scheduleRestart()
         }
 
@@ -185,7 +191,6 @@ private class DictationController(private val context: Context, private val hand
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        // Extras reconocidos por los motores (no API pública) para tolerar silencios largos
         putExtra("android.speech.extra.DICTATION_MODE", true)
         putExtra("android.speech.extras.SPEECH_INPUT_COMPLETE_SILENCE_DURATION_MILLIS", 10000)
         putExtra("android.speech.extras.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_DURATION_MILLIS", 10000)
@@ -194,8 +199,24 @@ private class DictationController(private val context: Context, private val hand
 }
 
 /**
- * Dictado por voz con sesión persistente: NO se cierra solo por pausas,
- * acumula todo lo hablado y solo se envía cuando el usuario presiona "Enviar".
+ * Unión de segmentos SIEMPRE con espacio (nunca "proyectoel") y sin duplicar texto.
+ * Función pura: nunca encoge el texto acumulado.
+ */
+private fun appendSegment(current: String, segment: String): String {
+    val seg = segment.trim()
+    if (seg.isEmpty()) return current
+    if (current.isBlank()) return seg
+    if (current.endsWith(seg, ignoreCase = true)) return current
+    if (current.length > seg.length && current.endsWith(" $seg")) return current
+    return current.trim() + " " + seg
+}
+
+/**
+ * Dictado por voz con sesión persistente.
+ *
+ * El texto acumulado vive en rememberSaveable: sobrevive a recreaciones del composable
+ * (e incluso a rotación de pantalla), por lo que NINGÚN reinicio del reconocedor puede
+ * borrar lo ya dictado. Solo el botón Limpiar (con doble confirmación) lo borra.
  */
 @Composable
 fun VoiceDictationDialog(
@@ -203,11 +224,15 @@ fun VoiceDictationDialog(
     onSend: (String) -> Unit
 ) {
     val context = LocalContext.current
-    var finalizedText by remember { mutableStateOf("") }
-    var partialText by remember { mutableStateOf("") }
+    // FUENTE DE VERDAD del dictado: sobrevive cualquier recreación del modal
+    var finalizedText by rememberSaveable { mutableStateOf("") }
+    var partialText by rememberSaveable { mutableStateOf("") }
+
     var isListening by remember { mutableStateOf(false) }
+    var micLevel by remember { mutableStateOf(0f) }
     var engineAvailable by remember { mutableStateOf(true) }
     var wantsListening by remember { mutableStateOf(true) }
+    var confirmClear by remember { mutableStateOf(false) }
     var hasPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -226,28 +251,17 @@ fun VoiceDictationDialog(
         DictationController(context.applicationContext, Handler(Looper.getMainLooper()))
     }
 
-    // Unión de segmentos SIEMPRE con espacio (nunca "proyectoel") y sin duplicar texto
-    fun appendSegment(current: String, segment: String): String {
-        val seg = segment.trim()
-        if (seg.isEmpty()) return current
-        if (current.isBlank()) return seg
-        // Evita duplicados si el final repite el final del texto ya acumulado
-        if (current.endsWith(seg, ignoreCase = true)) return current
-        if (current.length > seg.length && current.endsWith(" $seg")) return current
-        return current.trim() + " " + seg
-    }
-
+    // Re-conectar callbacks SIEMPRE que el composable se recomponga: nunca se pierde el vínculo
     DisposableEffect(controller, hasPermission) {
         if (hasPermission) {
             controller.onListeningChange = { listening -> isListening = listening }
+            controller.onRms = { dB -> micLevel = ((dB + 2f) / 12f).coerceIn(0f, 1f) }
             controller.onPartial = { p -> partialText = p }
             controller.onFinal = { f ->
-                // El resultado oficial incluye lo hablado en la sesión; sustituye al parcial
                 finalizedText = appendSegment(finalizedText, f)
                 partialText = ""
             }
             controller.onSessionAborted = {
-                // La sesión murió por pausa/silencio sin resultados: el parcial se vuelve firme
                 if (partialText.isNotBlank()) {
                     finalizedText = appendSegment(finalizedText, partialText)
                     partialText = ""
@@ -259,6 +273,7 @@ fun VoiceDictationDialog(
         onDispose {
             controller.destroy()
             controller.onListeningChange = null
+            controller.onRms = null
             controller.onPartial = null
             controller.onFinal = null
             controller.onSessionAborted = null
@@ -277,144 +292,274 @@ fun VoiceDictationDialog(
         }
     }
 
+    fun clearAll() {
+        finalizedText = ""
+        partialText = ""
+        confirmClear = false
+    }
+
+    fun sendNow() {
+        wantsListening = false
+        controller.pause()
+        val toSend = finalizedText.ifBlank { partialText }
+        onSend(SpeechContextPolisher.polishDictation(toSend))
+    }
+
+    // Auto-cancelación de la confirmación de borrado
+    LaunchedEffect(confirmClear) {
+        if (confirmClear) {
+            delay(2500)
+            confirmClear = false
+        }
+    }
+
     val composedText = if (partialText.isBlank()) finalizedText
     else if (finalizedText.isBlank()) partialText
     else "$finalizedText $partialText"
+    val wordCount = composedText.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+    val scrollState = rememberScrollState()
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Slate900,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(30.dp)
-                        .clip(CircleShape)
-                        .background(if (isListening) CyanNeon.copy(alpha = 0.2f) else Slate800),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.Mic,
-                        contentDescription = null,
-                        tint = if (isListening) CyanNeon else Slate400,
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
-                Column {
-                    Text(
-                        text = when {
-                            !engineAvailable -> "Dictado no disponible"
-                            !hasPermission -> "Permiso de micrófono"
-                            isListening -> "Escuchando..."
-                            wantsListening -> "Reconectando micrófono..."
-                            else -> "Micrófono en pausa"
-                        },
-                        color = if (isListening) CyanNeon else Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = if (!engineAvailable) "No hay motor de reconocimiento en este dispositivo"
-                        else "Puedes hacer pausas y pensar: nada se envía hasta que presiones Enviar",
-                        color = Slate400,
-                        fontSize = 10.sp
-                    )
-                }
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (!hasPermission) {
-                    Text(
-                        "Se necesita permiso de micrófono para el dictado. Cancela, vuelve a abrir el micrófono y concede el permiso.",
-                        color = AmberWarning,
-                        fontSize = 12.sp
-                    )
-                }
+    // Auto-scroll al último texto dictado
+    LaunchedEffect(composedText.length) {
+        if (composedText.isNotEmpty()) scrollState.animateScrollTo(scrollState.maxValue)
+    }
 
-                OutlinedTextField(
-                    value = composedText,
-                    onValueChange = { },
-                    readOnly = true,
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 24.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Slate900),
+            border = CardDefaults.outlinedCardBorder().copy(
+                brush = androidx.compose.ui.graphics.SolidColor(if (isListening) CyanNeon.copy(alpha = 0.5f) else Slate700)
+            )
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // ───────── Cabecera ─────────
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(160.dp),
-                    placeholder = {
-                        Text("Lo que hables aparecerá aquí...", color = Slate700, fontSize = 13.sp)
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = CyanNeon,
-                        unfocusedBorderColor = Slate700,
-                        focusedContainerColor = Slate800,
-                        unfocusedContainerColor = Slate800
-                    )
-                )
+                        .background(Slate950)
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when {
+                                    !engineAvailable -> Slate800
+                                    isListening -> CyanNeon.copy(alpha = 0.2f)
+                                    wantsListening -> AmberWarning.copy(alpha = 0.15f)
+                                    else -> Slate800
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Mic,
+                            contentDescription = null,
+                            tint = when {
+                                !engineAvailable -> Slate400
+                                isListening -> CyanNeon
+                                wantsListening -> AmberWarning
+                                else -> Slate400
+                            },
+                            modifier = Modifier.size(21.dp)
+                        )
+                    }
 
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = when {
+                                !engineAvailable -> "Dictado no disponible"
+                                !hasPermission -> "Permiso de micrófono"
+                                isListening -> "Escuchando..."
+                            else -> if (wantsListening) "Reconectando micrófono..." else "Micrófono en pausa"
+                            },
+                            color = when {
+                                isListening -> CyanNeon
+                                wantsListening -> AmberWarning
+                                else -> Color.White
+                            },
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = when {
+                                !engineAvailable -> "No hay motor de reconocimiento en este dispositivo"
+                                !hasPermission -> "Cancela y vuelve a abrir el micrófono para concederlo"
+                                else -> "Haz todas las pausas que necesites: nada se pierde ni se envía solo"
+                            },
+                            color = Slate400,
+                            fontSize = 10.sp
+                        )
+                    }
+
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Cerrar dictado", tint = Slate400, modifier = Modifier.size(19.dp))
+                    }
+                }
+
+                // ───────── Medidor de nivel de voz ─────────
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Slate950)
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    repeat(16) { i ->
+                        val active = !wantsListening && i == 0 || (wantsListening && micLevel * 16 > i)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(if (i < 8) (6 + i).dp else (6 + (15 - i)).dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(
+                                    when {
+                                        !wantsListening -> Slate800
+                                        active -> if (i > 12) AmberWarning else CyanNeon
+                                        else -> Slate800
+                                    }
+                                )
+                        )
+                    }
+                }
+
+                // ───────── Transcripción ─────────
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .height(210.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Slate950)
+                        .border(1.dp, Slate800, RoundedCornerShape(14.dp))
+                        .verticalScroll(scrollState)
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (composedText.isBlank()) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.Mic, contentDescription = null, tint = Slate700, modifier = Modifier.size(28.dp))
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text("Habla y tu dictado aparecerá aquí...", color = Slate700, fontSize = 12.sp)
+                        }
+                    } else {
+                        Column {
+                            if (finalizedText.isNotBlank()) {
+                                Text(
+                                    text = finalizedText,
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    lineHeight = 22.sp
+                                )
+                            }
+                            if (partialText.isNotBlank()) {
+                                Text(
+                                    text = if (finalizedText.isNotBlank()) " $partialText" else partialText,
+                                    color = CyanNeon.copy(alpha = 0.75f),
+                                    fontSize = 15.sp,
+                                    lineHeight = 22.sp,
+                                    fontStyle = FontStyle.Italic
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ───────── Contador y ayuda ─────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        IconButton(onClick = { togglePauseResume() }) {
+                    Text(
+                        text = "$wordCount palabra" + if (wordCount == 1) "" else "s",
+                        color = Slate400,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = if (confirmClear) "Toca de nuevo en Rojo para confirmar el borrado" else "El texto se conserva entre pausas",
+                        color = if (confirmClear) AmberWarning else Slate700,
+                        fontSize = 9.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // ───────── Acciones ─────────
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+                    Button(
+                        onClick = { sendNow() },
+                        enabled = composedText.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Enviar al asistente", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { togglePauseResume() },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Icon(
                                 if (wantsListening) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (wantsListening) "Pausar micrófono" else "Reanudar micrófono",
+                                contentDescription = null,
                                 tint = if (wantsListening) AmberWarning else CyanNeon,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                if (wantsListening) "Pausar micrófono" else "Reanudar",
+                                color = Color.White,
+                                fontSize = 12.sp
                             )
                         }
-                        IconButton(onClick = {
-                            finalizedText = ""
-                            partialText = ""
-                        }) {
+
+                        OutlinedButton(
+                            onClick = {
+                                if (confirmClear) clearAll() else confirmClear = true
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Icon(
                                 Icons.Default.Delete,
-                                contentDescription = "Limpiar texto",
-                                tint = Slate400,
-                                modifier = Modifier.size(20.dp)
+                                contentDescription = null,
+                                tint = if (confirmClear) AmberWarning else Slate400,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                if (confirmClear) "¿Confirmar borrado?" else "Limpiar",
+                                color = if (confirmClear) AmberWarning else Slate400,
+                                fontSize = 12.sp
                             )
                         }
                     }
-                    Text(
-                        text = when {
-                            !wantsListening -> "Micrófono pausado"
-                            isListening -> "Escuchando · habla con libertad"
-                            else -> "Preparando escucha..."
-                        },
-                        color = if (wantsListening) CyanNeon else AmberWarning,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
                 }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    wantsListening = false
-                    controller.pause()
-                    val toSend = finalizedText.ifBlank { partialText }
-                    onSend(SpeechContextPolisher.polishDictation(toSend))
-                },
-                enabled = composedText.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
-            ) {
-                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(15.dp))
-                Spacer(modifier = Modifier.size(4.dp))
-                Text("Enviar", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = {
-                wantsListening = false
-                controller.pause()
-                onDismiss()
-            }) {
-                Text("Cancelar", color = Slate400)
+
+                Spacer(modifier = Modifier.height(14.dp))
             }
         }
-    )
+    }
 }
