@@ -15,9 +15,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -152,6 +155,11 @@ class MainActivity : ComponentActivity() {
                         onUnlocked = { /* unlocked */ }
                     )
                 } else {
+                    // Detectar teclado abierto para ocultar la barra inferior (evita la franja
+                    // oscura que quedaba flotando entre el contenido y el teclado)
+                    val density = androidx.compose.ui.platform.LocalDensity.current
+                    val imeBottom = WindowInsets.ime.getBottom(density)
+
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
                         containerColor = MaterialTheme.colorScheme.background,
@@ -202,41 +210,51 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         bottomBar = {
-                            NavigationBar(
-                                containerColor = Slate900,
-                                contentColor = CyanNeon
-                            ) {
-                                NavigationTab.values().forEach { tab ->
-                                    val isSelected = currentTab == tab
-                                    NavigationBarItem(
-                                        selected = isSelected,
-                                        onClick = { currentTab = tab },
-                                        icon = {
-                                            Icon(tab.icon, contentDescription = tab.label)
-                                        },
-                                        label = {
-                                            Text(
-                                                tab.label,
-                                                fontSize = 10.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                        },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = CyanNeon,
-                                            selectedTextColor = CyanNeon,
-                                            indicatorColor = Slate800,
-                                            unselectedIconColor = Slate400,
-                                            unselectedTextColor = Slate400
-                                        ),
-                                        modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
-                                    )
+                            // La barra de navegación se oculta con el teclado abierto
+                            if (imeBottom == 0) {
+                                NavigationBar(
+                                    containerColor = Slate900,
+                                    contentColor = CyanNeon
+                                ) {
+                                    NavigationTab.values().forEach { tab ->
+                                        val isSelected = currentTab == tab
+                                        NavigationBarItem(
+                                            selected = isSelected,
+                                            onClick = { currentTab = tab },
+                                            icon = {
+                                                Icon(tab.icon, contentDescription = tab.label)
+                                            },
+                                            label = {
+                                                Text(
+                                                    tab.label,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            },
+                                            colors = NavigationBarItemDefaults.colors(
+                                                selectedIconColor = CyanNeon,
+                                                selectedTextColor = CyanNeon,
+                                                indicatorColor = Slate800,
+                                                unselectedIconColor = Slate400,
+                                                unselectedTextColor = Slate400
+                                            ),
+                                            modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
+                                        )
+                                    }
                                 }
                             }
                         }
                     ) { innerPadding ->
-                        // imePadding: cuando se abre el teclado, el contenido (incluidos los
-                        // inputs de Asistente y Juntas) se recorre hacia arriba y queda visible
-                        Box(modifier = Modifier.fillMaxSize().padding(innerPadding).imePadding()) {
+                        // consumeWindowInsets evita pagar dos veces la altura de la barra inferior
+                        // al sumarse el inset del teclado; así el input queda pegado al teclado
+                        // sin franja oscura de por medio
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(innerPadding)
+                                .consumeWindowInsets(innerPadding)
+                                .imePadding()
+                        ) {
                             AnimatedContent(targetState = currentTab, label = "tab_switch") { target ->
                                 when (target) {
                                     NavigationTab.AGENDA -> AgendaScreen(viewModel = viewModel)
