@@ -61,6 +61,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val ragEngine = RAGMemoryEngine(db.memoryDao())
     val rotator = LLMRotator.getInstance(application)
     val prefs = AppPreferences(application)
+
+    /**
+     * Dictado inteligente: transcripción con Whisper vía Groq (misma API key del rotador).
+     * null cuando no hay API key de Groq configurada — el modal usa entonces el modo directo.
+     */
+    val smartDictationTranscriber: (suspend (ByteArray) -> Result<String>)?
+        get() = if (rotator.config.groqApiKey.isNotBlank()) {
+            { wav -> com.example.data.speech.WhisperTranscriber.transcribe(wav, rotator.config.groqApiKey) }
+        } else null
     val webhookServer = LocalWebhookServer(application, db, ragEngine, port = 8765)
 
     private var tts: TextToSpeech? = null

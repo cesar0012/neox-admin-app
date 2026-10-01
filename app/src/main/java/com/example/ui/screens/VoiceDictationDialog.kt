@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -31,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -50,7 +52,6 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -64,11 +65,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.core.content.ContextCompat
+import com.example.data.speech.AudioSegmentRecorder
 import com.example.data.speech.SpeechContextPolisher
 import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
@@ -79,10 +84,13 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
- * Controlador de reconocimiento continuo (emisor puro de segmentos, sin estado de texto).
+ * Controlador de reconocimiento continuo con el motor del sistema (emisor puro de segmentos).
  *
  * Estrategia anti-cortes: cada segmento de dictado corre en una instancia NUEVA de
  * SpeechRecognizer; al terminar o fallar se destruye y se crea otra tras un backoff.
@@ -195,13 +203,25 @@ private class DictationController(private val context: Context, private val hand
 
     private fun listenIntent(): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-MX")
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         putExtra("android.speech.extra.DICTATION_MODE", true)
         putExtra("android.speech.extras.SPEECH_INPUT_COMPLETE_SILENCE_DURATION_MILLIS", 10000)
         putExtra("android.speech.extras.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_DURATION_MILLIS", 10000)
         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3000)
+        // Sesgo de vocabulario (API 33+): el reconocedor prioriza términos del dominio
+        if (Build.VERSION.SDK_INT >= 33) {
+            putExtra(
+                "android.speech.extra.BIASING_STRINGS",
+                arrayListOf(
+                    "junta", "agenda", "tarea", "entrega", "directiva", "llamada", "recordatorio",
+                    "proyecto", "prioridad", "asistente", "Neox", "OpenRouter", "NVIDIA", "Groq",
+                    "Whisper", "plantilla", "despliegue", "repositorio", "cliente", "proveedor",
+                    "mañana a las", "de la mañana", "de la tarde", "de la noche", "en punto"
+                )
+            )
+        }
     }
 }
 
@@ -219,18 +239,26 @@ private fun appendSegment(current: String, segment: String): String {
 }
 
 /**
- * Dictado por voz con sesión persistente.
+ * Dictado por voz con DOS motores:
  *
- * El texto acumulado vive en rememberSaveable: sobrevive a recreaciones del composable
- * (e incluso a rotación de pantalla), por lo que NINGÚN reinicio del reconocedor puede
- * borrar lo ya dictado. Solo el botón Limpiar (con doble confirmación) lo borra.
+ * - IA (Whisper): grabación continua con pausas ilimitadas; cada frase cerrada se
+ *   transcribe con Whisper vía Groq y aparece ya puntuada y con mayúsculas. Es el
+ *   mismo tipo de dictado inteligente de apps modernas: entiende contexto y prosodia.
+ * - Directo (Google): el reconocedor del sistema en vivo, con texto parcial en pantalla.
+ *
+ * El texto acumulado vive en rememberSaveable: sobrevive a recreaciones del composable,
+ * por lo que NINGÚN reinicio o cambio de motor puede borrar lo ya dictado. Solo el botón
+ * Limpiar (con doble confirmación) lo borra.
  */
 @Composable
 fun VoiceDictationDialog(
     onDismiss: () -> Unit,
-    onSend: (String) -> Unit
+    onSend: (String) -> Unit,
+    smartTranscribe: (suspend (ByteArray) -> Result<String>)? = null
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
     // FUENTE DE VERDAD del dictado: sobrevive cualquier recreación del modal
     var finalizedText by rememberSaveable { mutableStateOf("") }
     var partialText by rememberSaveable { mutableStateOf("") }
@@ -242,6 +270,17 @@ fun VoiceDictationDialog(
     var confirmClear by remember { mutableStateOf(false) }
     var isEditing by remember { mutableStateOf(false) }
     var editText by rememberSaveable { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+
+    // Modo de dictado: "ia" (Whisper) o "directo" (Google). Con fallback automático.
+    var dictMode by rememberSaveable { mutableStateOf(if (smartTranscribe != null) "ia" else "directo") }
+    val smartAvailable = smartTranscribe != null
+    val effectiveMode = if (smartAvailable) dictMode else "directo"
+
+    // Estado del modo IA
+    var processingCount by remember { mutableIntStateOf(0) }
+    var smartError by remember { mutableStateOf<String?>(null) }
+
     var hasPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -259,10 +298,54 @@ fun VoiceDictationDialog(
     val controller = remember {
         DictationController(context.applicationContext, Handler(Looper.getMainLooper()))
     }
+    val segmentQueue = remember { Channel<ByteArray>(Channel.UNLIMITED) }
+    val recorder = remember {
+        AudioSegmentRecorder(
+            onRms = { level -> micLevel = level },
+            onSegment = { wav -> segmentQueue.trySend(wav) },
+            onError = { msg -> smartError = msg }
+        )
+    }
 
-    // Re-conectar callbacks SIEMPRE que el composable se recomponga: nunca se pierde el vínculo
-    DisposableEffect(controller, hasPermission) {
-        if (hasPermission) {
+    // Consumidor SERIE de segmentos de audio: preserva el orden de las frases
+    LaunchedEffect(effectiveMode, smartTranscribe) {
+        if (effectiveMode != "ia" || smartTranscribe == null) return@LaunchedEffect
+        for (wav in segmentQueue) {
+            processingCount++
+            try {
+                val result = smartTranscribe(wav)
+                result.onSuccess { text ->
+                    if (text.isNotBlank()) {
+                        finalizedText = appendSegment(finalizedText, SpeechContextPolisher.polishDictation(text))
+                    }
+                }.onFailure { err ->
+                    smartError = "Transcripción IA falló: ${err.message?.take(80)}. " +
+                        "Sigue dictando (se reintenta solo) o cambia a Directo."
+                }
+            } finally {
+                processingCount--
+            }
+        }
+    }
+
+    // Micrófono activo solo cuando: hay permiso, no se pausó y no se está editando
+    val micActive = hasPermission && wantsListening && !isEditing && !sending &&
+        (effectiveMode == "ia" || engineAvailable)
+
+    // Motor IA: abrir/cerrar el micrófono según micActive (el hilo vive todo el modal)
+    DisposableEffect(effectiveMode, micActive) {
+        if (effectiveMode == "ia" && micActive) {
+            recorder.start()
+            recorder.resumeCapture()
+        } else {
+            recorder.suspendCapture()
+        }
+        onDispose { recorder.suspendCapture() }
+    }
+
+    // Motor directo: conectar callbacks SIEMPRE que el composable se recomponga
+    DisposableEffect(effectiveMode, hasPermission) {
+        if (effectiveMode == "directo" && hasPermission && micActive) {
             controller.onListeningChange = { listening -> isListening = listening }
             controller.onRms = { dB -> micLevel = ((dB + 2f) / 12f).coerceIn(0f, 1f) }
             controller.onPartial = { p -> partialText = p }
@@ -278,29 +361,28 @@ fun VoiceDictationDialog(
             }
             controller.onUnavailable = { engineAvailable = false }
             controller.start()
+        } else {
+            controller.pause()
         }
+        onDispose { controller.pause() }
+    }
+
+    // Liberación total al cerrar el modal
+    DisposableEffect(Unit) {
         onDispose {
             controller.destroy()
-            controller.onListeningChange = null
-            controller.onRms = null
-            controller.onPartial = null
-            controller.onFinal = null
-            controller.onSessionAborted = null
-            controller.onUnavailable = null
+            recorder.release()
+            segmentQueue.close()
         }
     }
 
-    /** Entra a modo edición: congela lo capturado, pausa el micrófono y deja corregir con el teclado. */
+    /** Entra a modo edición: congela lo capturado, pausa el micrófono y deja corregir con teclado. */
     fun startEditing() {
         if (isEditing) return
         editText = if (partialText.isBlank()) finalizedText
         else if (finalizedText.isBlank()) partialText
         else "$finalizedText $partialText"
         isEditing = true
-        if (wantsListening) {
-            wantsListening = false
-            controller.pause()
-        }
     }
 
     /** Termina la edición: el texto corregido queda como base y el dictado puede continuar encima. */
@@ -315,11 +397,9 @@ fun VoiceDictationDialog(
         if (isEditing) commitEditing()
         if (wantsListening) {
             wantsListening = false
-            controller.pause()
         } else {
             wantsListening = true
             partialText = ""
-            controller.start()
         }
     }
 
@@ -331,9 +411,20 @@ fun VoiceDictationDialog(
     }
 
     fun sendNow() {
+        if (sending) return
         wantsListening = false
-        controller.pause()
         val toSend = if (isEditing) editText.trim() else finalizedText.ifBlank { partialText }
+        // En modo IA con frases aún transcribiéndose: esperarlas para no enviar texto incompleto
+        if (effectiveMode == "ia" && !isEditing && processingCount > 0) {
+            sending = true
+            scope.launch {
+                delay(400) // margen para el flush del último segmento
+                snapshotFlow { processingCount }.first { it == 0 }
+                sending = false
+                onSend(SpeechContextPolisher.polishDictation(finalizedText.ifBlank { toSend }))
+            }
+            return
+        }
         onSend(SpeechContextPolisher.polishDictation(toSend))
     }
 
@@ -357,7 +448,7 @@ fun VoiceDictationDialog(
         if (!isEditing && composedText.isNotEmpty()) scrollState.animateScrollTo(scrollState.maxValue)
     }
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(onDismissRequest = { if (!sending) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -365,7 +456,13 @@ fun VoiceDictationDialog(
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = Slate900),
             border = CardDefaults.outlinedCardBorder().copy(
-                brush = androidx.compose.ui.graphics.SolidColor(if (isListening) CyanNeon.copy(alpha = 0.5f) else Slate700)
+                brush = SolidColor(
+                    when {
+                        sending -> CyanNeon.copy(alpha = 0.5f)
+                        isListening || (effectiveMode == "ia" && micActive) -> CyanNeon.copy(alpha = 0.5f)
+                        else -> Slate700
+                    }
+                )
             )
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -384,7 +481,8 @@ fun VoiceDictationDialog(
                             .background(
                                 when {
                                     !engineAvailable -> Slate800
-                                    isListening -> CyanNeon.copy(alpha = 0.2f)
+                                    sending -> CyanNeon.copy(alpha = 0.2f)
+                                    isListening || (effectiveMode == "ia" && micActive) -> CyanNeon.copy(alpha = 0.2f)
                                     wantsListening -> AmberWarning.copy(alpha = 0.15f)
                                     else -> Slate800
                                 }
@@ -396,7 +494,8 @@ fun VoiceDictationDialog(
                             contentDescription = null,
                             tint = when {
                                 !engineAvailable -> Slate400
-                                isListening -> CyanNeon
+                                sending -> CyanNeon
+                                isListening || (effectiveMode == "ia" && micActive) -> CyanNeon
                                 wantsListening -> AmberWarning
                                 else -> Slate400
                             },
@@ -411,11 +510,14 @@ fun VoiceDictationDialog(
                             text = when {
                                 !engineAvailable -> "Dictado no disponible"
                                 !hasPermission -> "Permiso de micrófono"
+                                sending -> "Transcribiendo tu voz..."
+                                effectiveMode == "ia" && micActive -> "Grabando (IA Whisper)..."
+                                effectiveMode == "ia" && !micActive -> "Micrófono en pausa"
                                 isListening -> "Escuchando..."
-                            else -> if (wantsListening) "Reconectando micrófono..." else "Micrófono en pausa"
+                                else -> if (wantsListening) "Reconectando micrófono..." else "Micrófono en pausa"
                             },
                             color = when {
-                                isListening -> CyanNeon
+                                sending || isListening || (effectiveMode == "ia" && micActive) -> CyanNeon
                                 wantsListening -> AmberWarning
                                 else -> TextPrimary
                             },
@@ -426,6 +528,9 @@ fun VoiceDictationDialog(
                             text = when {
                                 !engineAvailable -> "No hay motor de reconocimiento en este dispositivo"
                                 !hasPermission -> "Cancela y vuelve a abrir el micrófono para concederlo"
+                                effectiveMode == "ia" ->
+                                    if (processingCount > 0) "Transcribiendo $processingCount frase" + (if (processingCount == 1) "" else "s") + " con IA..."
+                                    else "Pausas ilimitadas: el texto aparece por frases, ya puntuado"
                                 else -> "Haz todas las pausas que necesites: nada se pierde ni se envía solo"
                             },
                             color = Slate400,
@@ -433,8 +538,34 @@ fun VoiceDictationDialog(
                         )
                     }
 
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = { if (!sending) onDismiss() }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Close, contentDescription = "Cerrar dictado", tint = Slate400, modifier = Modifier.size(19.dp))
+                    }
+                }
+
+                // ───────── Selector de motor ─────────
+                if (smartAvailable) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Slate950)
+                            .padding(horizontal = 16.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        EngineChip(
+                            selected = effectiveMode == "ia",
+                            enabled = !sending,
+                            icon = { Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(12.dp)) },
+                            label = "IA (Whisper)",
+                            onClick = { if (effectiveMode != "ia") { partialText = ""; dictMode = "ia" } }
+                        )
+                        EngineChip(
+                            selected = effectiveMode == "directo",
+                            enabled = !sending,
+                            icon = { Icon(Icons.Default.Mic, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(12.dp)) },
+                            label = "Directo (Google)",
+                            onClick = { if (effectiveMode != "directo") { partialText = ""; dictMode = "directo" } }
+                        )
                     }
                 }
 
@@ -477,10 +608,14 @@ fun VoiceDictationDialog(
                         Text(
                             text = when {
                                 isEditing -> "Editando — micrófono en pausa"
+                                sending -> "Enviando cuando termine la transcripción..."
+                                effectiveMode == "ia" && processingCount > 0 ->
+                                    "🧠 Whisper procesando ${processingCount} frase" + (if (processingCount == 1) "" else "s") + "..."
+                                effectiveMode == "ia" -> "Transcripción IA (puntuación y mayúsculas automáticas)"
                                 isListening -> "Escuchando (lo parcial va en cian)"
                                 else -> "Transcripción"
                             },
-                            color = if (isEditing) AmberWarning else Slate400,
+                            color = if (isEditing || sending) AmberWarning else Slate400,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -494,7 +629,7 @@ fun VoiceDictationDialog(
                                     if (isEditing) CyanNeon else Slate700,
                                     RoundedCornerShape(8.dp)
                                 )
-                                .clickable { if (isEditing) commitEditing() else startEditing() }
+                                .clickable(enabled = !sending) { if (isEditing) commitEditing() else startEditing() }
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -512,6 +647,15 @@ fun VoiceDictationDialog(
                                 )
                             }
                         }
+                    }
+
+                    smartError?.let { err ->
+                        Text(
+                            text = err,
+                            color = AmberWarning,
+                            fontSize = 9.sp,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
                     }
 
                     Box(
@@ -546,13 +690,18 @@ fun VoiceDictationDialog(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { startEditing() }
+                                    .clickable(enabled = !sending) { startEditing() }
                             ) {
                                 if (composedText.isBlank()) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                                         Icon(Icons.Default.Mic, contentDescription = null, tint = Slate700, modifier = Modifier.size(28.dp))
                                         Spacer(modifier = Modifier.height(6.dp))
-                                        Text("Habla, o toca aquí para escribir y corregir manualmente...", color = Slate700, fontSize = 12.sp)
+                                        Text(
+                                            if (effectiveMode == "ia") "Habla con naturalidad: Whisper escribe por frases, con pausas ilimitadas..."
+                                            else "Habla, o toca aquí para escribir y corregir manualmente...",
+                                            color = Slate700,
+                                            fontSize = 12.sp
+                                        )
                                     }
                                 } else {
                                     if (finalizedText.isNotBlank()) {
@@ -570,6 +719,13 @@ fun VoiceDictationDialog(
                                             fontSize = 15.sp,
                                             lineHeight = 22.sp,
                                             fontStyle = FontStyle.Italic
+                                        )
+                                    }
+                                    if (effectiveMode == "ia" && processingCount > 0 && micActive) {
+                                        Text(
+                                            text = " 🧠 …",
+                                            color = CyanNeon.copy(alpha = 0.55f),
+                                            fontSize = 15.sp
                                         )
                                     }
                                 }
@@ -609,7 +765,7 @@ fun VoiceDictationDialog(
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
                     Button(
                         onClick = { sendNow() },
-                        enabled = composedText.isNotBlank(),
+                        enabled = composedText.isNotBlank() || sending,
                         colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
@@ -618,7 +774,11 @@ fun VoiceDictationDialog(
                     ) {
                         Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(17.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Enviar al asistente", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(
+                            if (sending) "Transcribiendo antes de enviar..." else "Enviar al asistente",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -626,6 +786,7 @@ fun VoiceDictationDialog(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = { togglePauseResume() },
+                            enabled = !sending,
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.weight(1f)
                         ) {
@@ -647,6 +808,7 @@ fun VoiceDictationDialog(
                             onClick = {
                                 if (confirmClear) clearAll() else confirmClear = true
                             },
+                            enabled = !sending,
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.weight(1f)
                         ) {
@@ -669,5 +831,38 @@ fun VoiceDictationDialog(
                 Spacer(modifier = Modifier.height(14.dp))
             }
         }
+    }
+}
+
+/** Chip de selección del motor de dictado. */
+@Composable
+private fun EngineChip(
+    selected: Boolean,
+    enabled: Boolean,
+    icon: @Composable () -> Unit,
+    label: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) CyanNeon.copy(alpha = 0.18f) else Slate800)
+            .border(
+                1.dp,
+                if (selected) CyanNeon else Slate700,
+                RoundedCornerShape(10.dp)
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        icon()
+        Text(
+            label,
+            color = if (selected) TextPrimary else Slate400,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+        )
     }
 }

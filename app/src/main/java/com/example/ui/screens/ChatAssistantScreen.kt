@@ -530,7 +530,8 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
             onSend = { text ->
                 showDictation = false
                 viewModel.sendChatMessage(text, autoSpeak = autoSpeakEnabled)
-            }
+            },
+            smartTranscribe = viewModel.smartDictationTranscriber
         )
     }
 }
