@@ -123,15 +123,30 @@ object ReminderNotificationHelper {
             val oneDayMs = 24 * 3600 * 1000L
             val fiveDaysMs = 5 * oneDayMs
 
+            // Comparación por DÍAS DE CALENDARIO (no milisegundos crudos): una tarea de
+            // mañana a las 10:00 revisada hoy a las 23:00 es "mañana", nunca "vence hoy".
+            fun startOfDay(ts: Long): Long {
+                val cal = java.util.Calendar.getInstance().apply {
+                    timeInMillis = ts
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }
+                return cal.timeInMillis
+            }
+            val todayStart = startOfDay(now)
+
             tasks.filter { !it.isCompleted }.forEach { task ->
+                if (task.dueTimestamp <= 0L) return@forEach // sin fecha: nunca alerta
                 val remainingMs = task.dueTimestamp - now
-                val remainingDays = (remainingMs / oneDayMs).toInt()
+                val dayDiff = ((startOfDay(task.dueTimestamp) - todayStart) / oneDayMs).toInt()
                 val totalDurationMs = task.dueTimestamp - task.createdAt
                 val elapsedMs = now - task.createdAt
 
                 when {
                     // Overdue
-                    remainingMs < 0 -> {
+                    dayDiff < 0 -> {
                         showSmartDeadlineAlert(
                             context,
                             notificationId = (task.id + 10000).toInt(),
@@ -141,8 +156,8 @@ object ReminderNotificationHelper {
                             jobTag = task.jobTag
                         )
                     }
-                    // Due Today (< 24 hours)
-                    remainingMs in 0..oneDayMs -> {
+                    // Due Today (por fecha de calendario)
+                    dayDiff == 0 -> {
                         showSmartDeadlineAlert(
                             context,
                             notificationId = (task.id + 20000).toInt(),
@@ -153,27 +168,29 @@ object ReminderNotificationHelper {
                         )
                     }
                     // Due in next 5 days
-                    remainingMs in (oneDayMs + 1)..fiveDaysMs -> {
+                    dayDiff in 1..5 -> {
                         showSmartDeadlineAlert(
                             context,
                             notificationId = (task.id + 30000).toInt(),
                             title = task.title,
-                            message = "⏳ PRÓXIMOS DÍAS: Quedan $remainingDays días para la fecha de entrega.",
+                            message = "⏳ PRÓXIMOS DÍAS: Quedan $dayDiff día" + (if (dayDiff == 1) "" else "s") + " para la fecha de entrega.",
                             alertType = "PRÓXIMOS 5 DÍAS",
                             jobTag = task.jobTag
                         )
                     }
                     // Halfway or 10-day remaining effort rule
-                    remainingDays in 6..10 || (totalDurationMs > 3 * oneDayMs && elapsedMs >= totalDurationMs / 2) -> {
+                    dayDiff in 6..10 || (totalDurationMs > 3 * oneDayMs && elapsedMs >= totalDurationMs / 2) -> {
                         showSmartDeadlineAlert(
                             context,
                             notificationId = (task.id + 40000).toInt(),
                             title = task.title,
-                            message = "⚠️ ALERTA DE AVANCE: Quedan $remainingDays días para concluir este proyecto. Se recomienda iniciar y asegurar el tiempo de desarrollo necesario.",
+                            message = "⚠️ ALERTA DE AVANCE: Quedan $dayDiff días para concluir este proyecto. Se recomienda iniciar y asegurar el tiempo de desarrollo necesario.",
                             alertType = "REGLA DE ENTREGA",
                             jobTag = task.jobTag
                         )
                     }
+                    // Sin ventana activa: no notificar (el remainingMs ya no se usa como criterio)
+                    else -> if (remainingMs < 0) { /* cubierto arriba */ }
                 }
             }
         } catch (t: Throwable) {

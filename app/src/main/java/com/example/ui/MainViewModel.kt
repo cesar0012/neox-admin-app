@@ -432,7 +432,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val priority: String,
         val dueTimestamp: Long, // 0 = sin fecha especificada
         val confidence: String,
-        val viaLLM: Boolean
+        val viaLLM: Boolean,
+        val hasTime: Boolean = true // false = el usuario no especificó hora
     )
 
     /** Resultado del sub-agente extractor: puede decidir que el mensaje NO es una orden de agenda. */
@@ -498,6 +499,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             REGLAS DE FECHA:
             - Devuelve la fecha en lenguaje natural tal cual se entiende ("viernes", "mañana", "en 3 días", "25/12/2026") o "sin fecha" si el usuario no mencionó ninguna. NUNCA fechas pasadas.
 
+            REGLAS DE HORA:
+            - Si el usuario mencionó hora explícita ("a las 3", "a las 15:30"), devuélvela en formato HH:mm (24h).
+            - Si NO la mencionó, escribe "sin hora" (el sistema pondrá 9:00 por defecto y avisará al usuario).
+
             Responde EXACTAMENTE con este formato (sin texto extra):
             ---TITULO---
             [título técnico corto]
@@ -509,6 +514,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             [ALTA o MEDIA o BAJA]
             ---FECHA---
             [fecha natural o "sin fecha"]
+            ---HORA---
+            [HH:mm o "sin hora"]
             ---CONFIANZA---
             [ALTA si el pedido fue claro; MEDIA si es ambiguo o implícito; BAJA si es muy incierto]
         """.trimIndent()
@@ -539,10 +546,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val description = section("---DESCRIPCION---", "---TIPO---").ifBlank { "Agendado desde el asistente conversacional" }
         val typeRaw = section("---TIPO---", "---PRIORIDAD---").uppercase(Locale.getDefault()).trim()
         val prioRaw = section("---PRIORIDAD---", "---FECHA---").uppercase(Locale.getDefault()).trim()
-        val fechaText = section("---FECHA---", "---CONFIANZA---").trim()
+        val fechaText = section("---FECHA---", "---HORA---").trim()
+        val horaText = section("---HORA---", "---CONFIANZA---").trim()
         val confRaw = section("---CONFIANZA---", "---FIN---").uppercase(Locale.getDefault()).trim()
 
-        val due = resolveDateTextToTimestamp(fechaText)
+        val due = resolveDateTextToTimestamp(fechaText, horaText)
         return TaskExtraction.Details(
             ExtractedTaskDetails(
                 title = title,
@@ -551,7 +559,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 priority = if (prioRaw in listOf("ALTA", "MEDIA", "BAJA")) prioRaw else "MEDIA",
                 dueTimestamp = due,
                 confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.MEDIA,
-                viaLLM = true
+                viaLLM = true,
+                hasTime = hasExplicitHour(horaText)
             )
         )
     }
@@ -620,13 +629,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return NoteDetails(title = title.replaceFirstChar { it.uppercase(Locale.getDefault()) }, description = inputText.trim(), category = category)
     }
 
-    /** Texto natural de fecha -> timestamp SIEMPRE futuro; 0 cuando no hay fecha válida. */
-    private fun resolveDateTextToTimestamp(fechaText: String?): Long {
+    /** Texto natural de fecha -> timestamp SIEMPRE futuro; 0 cuando no hay fecha válida.
+     *  horaText "HH:mm" opcional: si viene, se fija esa hora; si no, se usa 09:00 por defecto. */
+    private fun resolveDateTextToTimestamp(fechaText: String?, horaText: String? = null): Long {
         if (fechaText.isNullOrBlank()) return 0L
         val clean = fechaText.trim().lowercase(Locale.getDefault())
         if (clean == "-" || clean == "sin fecha" || clean == "sin especificar" || clean == "n/a") return 0L
-        return SpanishDateParser.resolveDueTimestamp(clean) ?: 0L
+        val resolved = SpanishDateParser.resolveDueTimestamp(clean) ?: return 0L
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = resolved }
+        val m = Regex("(\\d{1,2}):(\\d{2})").find(horaText.orEmpty())
+        return if (m != null) {
+            val h = m.groupValues[1].toIntOrNull()?.coerceIn(0, 23) ?: 9
+            val min = m.groupValues[2].toIntOrNull()?.coerceIn(0, 59) ?: 0
+            cal.set(java.util.Calendar.HOUR_OF_DAY, h)
+            cal.set(java.util.Calendar.MINUTE, min)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.timeInMillis
+        } else {
+            // Sin hora explícita: 9:00 por defecto (estable, no depende de la hora actual)
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.timeInMillis
+        }
     }
+
+    private fun hasExplicitHour(horaText: String?): Boolean =
+        Regex("(\\d{1,2}):(\\d{2})").containsMatchIn(horaText.orEmpty())
 
     /** Fallback sin LLM: extracción ingenua pero con tipo, confianza MEDIA y sin fecha si no se dijo. */
     private fun naiveTaskExtraction(inputText: String, activeProject: String): ExtractedTaskDetails {
@@ -636,6 +665,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .replace(Regex("\\s+(?:para|el|la)\\s+(?:el\\s+|la\\s+)?(?:pr[oó]xim[oa]\\s+|siguiente\\s+)?(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|mañana|manana|hoy)(?:\\s+que\\s+viene|\\s+pr[oó]xim[oa])?\\s*$", RegexOption.IGNORE_CASE), "")
             .trim().trimEnd('.', '!', '?')
         val title = rawTitle.ifBlank { "Tarea pendiente" }.replaceFirstChar { it.uppercase(Locale.getDefault()) }
+        val withExplicitHour = Regex("\\d{1,2}:\\d{2}|a\\s+las\\s+\\d{1,2}").containsMatchIn(lower)
         val due = SpanishDateParser.resolveDueTimestamp(lower) ?: 0L
         return ExtractedTaskDetails(
             title = title,
@@ -644,7 +674,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             priority = if (lower.contains("urgente") || lower.contains("alta")) "ALTA" else if (lower.contains("baja")) "BAJA" else "MEDIA",
             dueTimestamp = due,
             confidence = ConfidenceLevels.MEDIA,
-            viaLLM = false
+            viaLLM = false,
+            hasTime = withExplicitHour
         )
     }
 
@@ -680,7 +711,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         priority: String = "MEDIA",
         originRef: String = "",
         taskType: String = TaskTypes.TAREA,
-        confidence: String = ConfidenceLevels.ALTA
+        confidence: String = ConfidenceLevels.ALTA,
+        hasTime: Boolean = true
     ) {
         viewModelScope.launch {
             val safeType = if (TaskTypes.isValid(taskType)) taskType else TaskTypes.TAREA
@@ -693,6 +725,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 priority = priority,
                 taskType = safeType,
                 confidence = safeConfidence,
+                hasTime = hasTime,
                 originReference = originRef
             )
             val id = db.taskDao().insertTask(task)
@@ -729,7 +762,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         newType: String,
         newPriority: String,
         newDueTimestamp: Long,
-        newJobTag: String
+        newJobTag: String,
+        newHasTime: Boolean = true
     ) {
         viewModelScope.launch {
             val updated = task.copy(
@@ -738,7 +772,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 taskType = if (TaskTypes.isValid(newType)) newType else task.taskType,
                 priority = newPriority,
                 dueTimestamp = newDueTimestamp,
-                jobTag = newJobTag
+                jobTag = newJobTag,
+                hasTime = newHasTime
             )
             db.taskDao().updateTask(updated)
             db.memoryDao().deleteChunksBySource(updated.id, "TASK")
@@ -1159,12 +1194,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 - Todas las respuestas, análisis y contexto pertenecen a "$activeProject".
                 - Usa el HISTORIAL RECIENTE para entender correcciones: si el usuario dice que algo quedó mal o da una nueva fecha, se refiere a lo hablado antes.
                 - Si el usuario pide agendar algo, usa el comando con esta especificación:
-                  ---ACTION:CREATE_TASK|titulo|prioridad|fechaTexto|tipo|confianza---
+                  ---ACTION:CREATE_TASK|titulo|prioridad|fechaTexto|tipo|confianza|hora---
                   * titulo: CORTO (máx 8 palabras), técnico y orientado a acción. NUNCA frases literales del usuario ni sus opiniones ("no me gustó..." jamás va en un título). Junta → "Junta: ...".
                   * prioridad: ALTA / MEDIA / BAJA.
                   * fechaTexto: la fecha en lenguaje natural tal como la entiendes ("viernes", "mañana", "en 3 días", "25/12/2026") o "-" si el usuario NO mencionó fecha.
                   * tipo: TAREA / JUNTA / LLAMADA / ENTREGA / RECORDATORIO (según lo pedido: reunión=junta, llamada telefónica=llamada, deadline o envío=entrega).
                   * confianza: ALTA si el pedido fue claro, MEDIA si ambiguo, BAJA si muy incierto.
+                  * hora: HH:mm (24h) si el usuario la mencionó, o "sin hora" si no.
                 - Para re-agendar/cambiar fecha (incluye cuando el usuario corrige una fecha mal agendada):
                   ---ACTION:RESCHEDULE_TASK|titulo|fechaTexto---
                 - Para concluir tarea: ---ACTION:COMPLETE_TASK|titulo---
@@ -1195,6 +1231,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             INSTRUCCIONES CLAVE DE FORMATO Y ESTILO:
             1. NUNCA generes ni incluyas etiquetas de razonamiento interno como <think>, </think>, o similares. Responde directamente con tu análisis o respuesta ejecutiva.
             2. Basa tus respuestas en la memoria RAG, en las tareas listadas y en el historial de la conversación.
+
+            DIRECTIVAS BASE (aplican SIEMPRE, en todos los proyectos):
+            A. TÍTULOS: cortos o medios, describiendo QUÉ se va a hacer. Descripción separada, inteligente y bien redactada (contexto, propósito, implicados), nunca frases literales del usuario.
+            B. VALORES POR DEFECTO: si el usuario no especificó hora, día exacto (ej. solo dijo "la próxima semana") u otro parámetro y tú elegiste uno, AVÍSALO explícitamente al final de tu respuesta y ofrécele cambiarlo. Ejemplos:
+               - "No especificaste hora: quedó a las 9:00 por defecto. ¿La modifico?"
+               - "La agendé para el miércoles 7 porque pediste la próxima semana sin día. Dime si la cambio de fecha, o edítala en la Agenda."
+            C. Al confirmar agendados, menciona tipo (se agendó una JUNTA/tarea/llamada), fecha completa y hora (o que no fue especificada).
             3. Sé proactivo, conciso, ultra-profesional y directo.
         """.trimIndent()
 
@@ -1268,11 +1311,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         return when (actionType) {
             "CREATE_TASK" -> {
-                // ACTION:CREATE_TASK|titulo|prioridad|fechaTexto|tipo|confianza
+                // ACTION:CREATE_TASK|titulo|prioridad|fechaTexto|tipo|confianza|hora(opcional HH:mm)
                 val parts = payload.split("|")
                 val title = parts.getOrNull(0)?.trim()?.ifBlank { "Nueva tarea" } ?: "Nueva tarea"
                 val priority = parts.getOrNull(1)?.trim()?.uppercase(Locale.getDefault()) ?: "MEDIA"
-                val due = resolveDateTextToTimestamp(parts.getOrNull(2))
+                val horaRaw = parts.getOrNull(5)?.trim().orEmpty()
+                val due = resolveDateTextToTimestamp(parts.getOrNull(2), horaRaw)
+                val withTime = hasExplicitHour(horaRaw)
                 val typeRaw = parts.getOrNull(3)?.trim()?.uppercase(Locale.getDefault()).orEmpty()
                 val confRaw = parts.getOrNull(4)?.trim()?.uppercase(Locale.getDefault()).orEmpty()
 
@@ -1284,6 +1329,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     priority = if (priority in listOf("ALTA", "MEDIA", "BAJA")) priority else "MEDIA",
                     taskType = if (TaskTypes.isValid(typeRaw)) typeRaw else TaskTypes.TAREA,
                     confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.ALTA,
+                    hasTime = withTime,
                     originReference = "Asistente Conversacional"
                 )
                 val id = db.taskDao().insertTask(task)
@@ -1292,7 +1338,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "Tarea: $title. Tipo: ${TaskTypes.labelOf(task.taskType)}. Proyecto: $activeProject."
                 )
                 "\n\n✅ *[Acción ejecutada: ${TaskTypes.labelOf(task.taskType)} \"$title\" agendada en $activeProject para ${formatDueForHumans(due)}]*" +
-                    (if (due <= 0L) " *Sin fecha: pendiente de día y hora.*" else "")
+                    when {
+                        due <= 0L -> " *Sin fecha: pendiente de día y hora — dime cuándo la agendo.*"
+                        !withTime -> " *Hora no especificada: quedó a las ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(due))} por defecto; dime si la cambio.*"
+                        else -> ""
+                    }
             }
             "RESCHEDULE_TASK" -> {
                 // ACTION:RESCHEDULE_TASK|titulo|fechaTexto
@@ -1504,6 +1554,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 priority = extracted.priority,
                 taskType = extracted.taskType,
                 confidence = extracted.confidence,
+                hasTime = extracted.hasTime,
                 originReference = "Asistente ($activeProject)" + if (extracted.viaLLM) "" else " (sin LLM)"
             )
             val taskId = db.taskDao().insertTask(task)
@@ -1527,13 +1578,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val typeLabel = TaskTypes.labelOf(extracted.taskType)
             val confLabel = when (extracted.confidence) { "BAJA" -> "Baja"; "MEDIA" -> "Media"; else -> "Alta" }
+            val defaultsNotice = buildString {
+                if (extracted.dueTimestamp <= 0L) {
+                    append("\n\n📌 No especificaste día ni hora: quedó como pendiente sin fecha (no aparece en calendario). Dime la fecha y la re-agendo, o edítala en la Agenda.")
+                } else if (!extracted.hasTime) {
+                    append("\n\n📌 No especificaste hora: quedó a las ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(extracted.dueTimestamp))} por defecto. Dime si la cambio, o edítala en la Agenda.")
+                }
+            }
             return "✅ **$typeLabel Agendada en $activeProject:**\n" +
                 "• **Título:** ${extracted.title}\n" +
                 "• **Tipo:** $typeLabel\n" +
                 "• **Prioridad:** ${extracted.priority}\n" +
-                "• **Vencimiento:** ${formatDueForHumans(extracted.dueTimestamp)}\n" +
+                "• **Vencimiento:** ${formatDueForHumans(extracted.dueTimestamp)}" + (if (extracted.dueTimestamp > 0 && !extracted.hasTime) " *(sin hora específica)*" else "") + "\n" +
                 "• **Confianza:** $confLabel" +
-                (if (extracted.dueTimestamp <= 0L) "\n\n📌 No se especificó día ni hora: aparece en tus tareas pendientes pero no en el calendario. Dime la fecha y la re-agendo." else "") +
+                defaultsNotice +
                 "\n\nGuardada en tu agenda y vectorizada en memoria RAG."
         }
 

@@ -28,6 +28,7 @@ data class WorkTask(
     val priority: String = "MEDIA", // ALTA, MEDIA, BAJA
     @ColumnInfo(defaultValue = "TAREA") val taskType: String = TaskTypes.TAREA, // TAREA, JUNTA, LLAMADA, ENTREGA, RECORDATORIO
     @ColumnInfo(defaultValue = "ALTA") val confidence: String = ConfidenceLevels.ALTA, // ALTA, MEDIA, BAJA
+    @ColumnInfo(defaultValue = "1") val hasTime: Boolean = true, // false = el usuario no especificó hora
     val originReference: String = "", // e.g. "Junta 28 Sep - Minuta de requerimientos"
     val createdAt: Long = System.currentTimeMillis()
 )

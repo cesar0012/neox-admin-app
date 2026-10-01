@@ -98,7 +98,7 @@ enum class NavigationTab(val label: String, val icon: ImageVector) {
     MEETINGS("Juntas", Icons.Default.Mic),
     ASSISTANT("Asistente", Icons.Default.Chat),
     KNOWLEDGE("Memoria", Icons.Default.Folder),
-    CONFIG("Configuración", Icons.Default.Settings)
+    CONFIG("Config", Icons.Default.Settings)
 }
 
 class MainActivity : ComponentActivity() {

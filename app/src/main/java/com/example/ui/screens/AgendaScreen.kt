@@ -56,8 +56,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDefaults
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,6 +75,9 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -108,6 +115,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 enum class AgendaViewTab(val label: String, val icon: ImageVector) {
     LIST("Lista y Filtros", Icons.Default.ViewList),
@@ -302,8 +310,8 @@ fun AgendaScreen(viewModel: MainViewModel) {
             jobList = jobs.map { it.name },
             initialJob = if (selectedFilter != "Todos") selectedFilter ?: "General" else "General",
             onDismiss = { showAddTaskDialog = false },
-            onSave = { title, desc, jobTag, dueTime, priority, type ->
-                viewModel.addTask(title, desc, jobTag, dueTime, priority, taskType = type)
+            onSave = { title, desc, jobTag, dueTime, priority, type, hasTime ->
+                viewModel.addTask(title, desc, jobTag, dueTime, priority, taskType = type, hasTime = hasTime)
                 showAddTaskDialog = false
             }
         )
@@ -314,8 +322,8 @@ fun AgendaScreen(viewModel: MainViewModel) {
             task = task,
             jobList = jobs.map { it.name },
             onDismiss = { taskToEdit = null },
-            onSave = { title, desc, type, priority, due, job ->
-                viewModel.updateTaskDetails(task, title, desc, type, priority, due, job)
+            onSave = { title, desc, type, priority, due, job, hasTime ->
+                viewModel.updateTaskDetails(task, title, desc, type, priority, due, job, hasTime)
                 taskToEdit = null
             }
         )
@@ -1926,9 +1934,11 @@ fun TaskCard(
                             Text(
                                 text = when {
                                     noDate -> "Sin día ni hora especificados"
-                                    isOverdue -> "Vencida: ${dateFormat.format(Date(task.dueTimestamp))} ${timeFormat.format(Date(task.dueTimestamp))}"
-                                    isDueToday -> "Vence hoy a las ${timeFormat.format(Date(task.dueTimestamp))}"
-                                    else -> "${dateFormat.format(Date(task.dueTimestamp))} · ${timeFormat.format(Date(task.dueTimestamp))}"
+                                    isOverdue -> "Vencida: ${dateFormat.format(Date(task.dueTimestamp))}" +
+                                        (if (task.hasTime) " ${timeFormat.format(Date(task.dueTimestamp))}" else "")
+                                    isDueToday -> if (task.hasTime) "Vence hoy a las ${timeFormat.format(Date(task.dueTimestamp))}" else "Vence hoy · sin hora específica"
+                                    else -> "${dateFormat.format(Date(task.dueTimestamp))}" +
+                                        (if (task.hasTime) " · ${timeFormat.format(Date(task.dueTimestamp))}" else " · sin hora específica")
                                 },
                                 color = when {
                                     noDate -> Slate400
@@ -1998,7 +2008,7 @@ fun AddTaskDialog(
     jobList: List<String>,
     initialJob: String,
     onDismiss: () -> Unit,
-    onSave: (title: String, desc: String, jobTag: String, dueTime: Long, priority: String, taskType: String) -> Unit
+    onSave: (title: String, desc: String, jobTag: String, dueTime: Long, priority: String, taskType: String, hasTime: Boolean) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
@@ -2007,16 +2017,8 @@ fun AddTaskDialog(
     var selectedType by remember { mutableStateOf(TaskTypes.TAREA) }
 
     val now = remember { System.currentTimeMillis() }
-    val dueOptions = remember {
-        listOf(
-            "Hoy" to (now + 2 * 3600_000L),
-            "Mañana" to (now + 86400_000L),
-            "En 1 semana" to (now + 7 * 86400_000L),
-            "Sin fecha" to 0L
-        )
-    }
-    var selectedDueLabel by remember { mutableStateOf("Mañana") }
-    val dueTimestamp = dueOptions.firstOrNull { it.first == selectedDueLabel }?.second ?: (now + 86400_000L)
+    var selectedDue by remember { mutableStateOf(now + 86400_000L) } // Mañana por defecto
+    var selectedHasTime by remember { mutableStateOf(true) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2065,16 +2067,12 @@ fun AddTaskDialog(
                     }
                 }
 
-                Text("Fecha:", color = Slate400, fontSize = 12.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    dueOptions.forEach { (label, _) ->
-                        FilterChip(
-                            label = label,
-                            isSelected = selectedDueLabel == label,
-                            onClick = { selectedDueLabel = label }
-                        )
-                    }
-                }
+                DueDateTimeEditor(
+                    dueTimestamp = selectedDue,
+                    hasTime = selectedHasTime,
+                    onDueChange = { selectedDue = it },
+                    onHasTimeChange = { selectedHasTime = it }
+                )
 
                 Text("Proyecto / Trabajo:", color = Slate400, fontSize = 12.sp)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2104,7 +2102,7 @@ fun AddTaskDialog(
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onSave(title, description, selectedJob, dueTimestamp, selectedPriority, selectedType)
+                        onSave(title, description, selectedJob, selectedDue, selectedPriority, selectedType, selectedHasTime)
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
@@ -2126,26 +2124,15 @@ fun EditTaskDialog(
     task: WorkTask,
     jobList: List<String>,
     onDismiss: () -> Unit,
-    onSave: (title: String, desc: String, type: String, priority: String, due: Long, jobTag: String) -> Unit
+    onSave: (title: String, desc: String, type: String, priority: String, due: Long, jobTag: String, hasTime: Boolean) -> Unit
 ) {
     var title by remember(task.id) { mutableStateOf(task.title) }
     var description by remember(task.id) { mutableStateOf(task.description) }
     var selectedType by remember(task.id) { mutableStateOf(if (TaskTypes.isValid(task.taskType)) task.taskType else TaskTypes.TAREA) }
     var selectedPriority by remember(task.id) { mutableStateOf(task.priority) }
     var selectedJob by remember(task.id) { mutableStateOf(task.jobTag) }
-
-    val now = remember { System.currentTimeMillis() }
-    val dueOptions = remember(task.id) {
-        buildList {
-            add("Mantener fecha" to task.dueTimestamp)
-            add("Hoy" to (now + 2 * 3600_000L))
-            add("Mañana" to (now + 86400_000L))
-            add("En 1 semana" to (now + 7 * 86400_000L))
-            add("Sin fecha" to 0L)
-        }
-    }
-    var selectedDueLabel by remember(task.id) { mutableStateOf("Mantener fecha") }
-    val dueTimestamp = dueOptions.firstOrNull { it.first == selectedDueLabel }?.second ?: task.dueTimestamp
+    var selectedDue by remember(task.id) { mutableStateOf(task.dueTimestamp) }
+    var selectedHasTime by remember(task.id) { mutableStateOf(task.hasTime) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2207,16 +2194,12 @@ fun EditTaskDialog(
                     }
                 }
 
-                Text("Fecha:", color = Slate400, fontSize = 12.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    dueOptions.forEach { (label, _) ->
-                        FilterChip(
-                            label = label,
-                            isSelected = selectedDueLabel == label,
-                            onClick = { selectedDueLabel = label }
-                        )
-                    }
-                }
+                DueDateTimeEditor(
+                    dueTimestamp = selectedDue,
+                    hasTime = selectedHasTime,
+                    onDueChange = { selectedDue = it },
+                    onHasTimeChange = { selectedHasTime = it }
+                )
 
                 if (jobList.isNotEmpty()) {
                     Text("Proyecto / Trabajo:", color = Slate400, fontSize = 12.sp)
@@ -2236,7 +2219,7 @@ fun EditTaskDialog(
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onSave(title, description, selectedType, selectedPriority, dueTimestamp, selectedJob)
+                        onSave(title, description, selectedType, selectedPriority, selectedDue, selectedJob, selectedHasTime)
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
@@ -2250,6 +2233,143 @@ fun EditTaskDialog(
             }
         }
     )
+}
+
+/** Convierte el midnight-UTC que devuelve DatePicker a fecha local preservando la hora actual. */
+private fun utcDateToLocal(utcMillis: Long, preserveTimeFrom: Long?): Long {
+    val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+    return Calendar.getInstance().apply {
+        if (preserveTimeFrom != null && preserveTimeFrom > 0) {
+            val t = Calendar.getInstance().apply { timeInMillis = preserveTimeFrom }
+            set(t.get(Calendar.HOUR_OF_DAY), t.get(Calendar.MINUTE))
+        }
+        set(utcCal.get(Calendar.YEAR), utcCal.get(Calendar.MONTH), utcCal.get(Calendar.DAY_OF_MONTH))
+        set(Calendar.SECOND, 0)
+    }.timeInMillis
+}
+
+/**
+ * Editor de fecha y hora: chips rápidos + selección exacta con calendario y reloj,
+ * con la opción de marcar "sin hora específica".
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DueDateTimeEditor(
+    dueTimestamp: Long,
+    hasTime: Boolean,
+    onDueChange: (Long) -> Unit,
+    onHasTimeChange: (Boolean) -> Unit
+) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    val now = remember { System.currentTimeMillis() }
+    val dateLabel = if (dueTimestamp <= 0L) "Sin fecha"
+    else SimpleDateFormat("EEE d MMM yyyy", Locale("es", "ES")).format(Date(dueTimestamp))
+    val timeLabel = if (dueTimestamp <= 0L || !hasTime) "Sin hora"
+    else SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(dueTimestamp))
+
+    fun quickDue(days: Long): Long {
+        val cal = Calendar.getInstance().apply {
+            timeInMillis = if (dueTimestamp > 0) dueTimestamp else now
+            add(Calendar.DAY_OF_YEAR, days.toInt())
+        }
+        return cal.timeInMillis
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Fecha:", color = Slate400, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(label = "Hoy", isSelected = false, onClick = { onDueChange(quickDue(0)) })
+            FilterChip(label = "Mañana", isSelected = false, onClick = { onDueChange(quickDue(1)) })
+            FilterChip(label = "+7 días", isSelected = false, onClick = { onDueChange(quickDue(7)) })
+            FilterChip(label = "Sin fecha", isSelected = dueTimestamp <= 0L, onClick = { onDueChange(0L) })
+            FilterChip(label = "📅 $dateLabel".replace("📅 ", ""), isSelected = dueTimestamp > 0L, onClick = { showDatePicker = true })
+        }
+
+        Text("Hora:", color = Slate400, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(
+                label = "⏰ $timeLabel".replace("⏰ ", ""),
+                isSelected = hasTime && dueTimestamp > 0L,
+                onClick = { showTimePicker = true }
+            )
+            FilterChip(
+                label = "Sin hora específica",
+                isSelected = !hasTime || dueTimestamp <= 0L,
+                onClick = { onHasTimeChange(false) }
+            )
+        }
+        if (!hasTime && dueTimestamp > 0L) {
+            Text(
+                "La tarea queda agendada al día; sin notificación de hora exacta.",
+                color = Slate700,
+                fontSize = 9.sp
+            )
+        }
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = if (dueTimestamp > 0) dueTimestamp else System.currentTimeMillis()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { utc ->
+                        onDueChange(utcDateToLocal(utc, if (hasTime) dueTimestamp else null))
+                    }
+                    showDatePicker = false
+                }) { Text("Aceptar", color = CyanNeon) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancelar", color = Slate400) }
+            },
+            colors = DatePickerDefaults.colors(containerColor = Slate900)
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    if (showTimePicker) {
+        val initial = Calendar.getInstance().apply { timeInMillis = if (dueTimestamp > 0) dueTimestamp else now }
+        val timePickerState = rememberTimePickerState(
+            initialHour = initial.get(Calendar.HOUR_OF_DAY),
+            initialMinute = initial.get(Calendar.MINUTE),
+            is24Hour = true
+        )
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            containerColor = Slate900,
+            title = { Text("Hora de la tarea", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TimePicker(state = timePickerState)
+                    TextButton(onClick = {
+                        onHasTimeChange(false)
+                        showTimePicker = false
+                    }) { Text("Quitar hora (sin hora específica)", color = Slate400, fontSize = 11.sp) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val cal = Calendar.getInstance().apply {
+                        timeInMillis = if (dueTimestamp > 0) dueTimestamp else (now + 86400_000L)
+                        set(Calendar.HOUR_OF_DAY, timePickerState.hour)
+                        set(Calendar.MINUTE, timePickerState.minute)
+                        set(Calendar.SECOND, 0)
+                    }
+                    onDueChange(cal.timeInMillis)
+                    onHasTimeChange(true)
+                    showTimePicker = false
+                }) { Text("Aceptar", color = CyanNeon) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) { Text("Cancelar", color = Slate400) }
+            }
+        )
+    }
 }
 
 private fun getStartOfDay(timestamp: Long): Long {

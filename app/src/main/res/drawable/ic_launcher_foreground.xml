@@ -1,44 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- Outer Hexagonal Tech Frame -->
-    <path
-        android:pathData="M54,23 L83,39 L83,69 L54,85 L25,69 L25,39 Z"
-        android:strokeWidth="3.2"
-        android:strokeColor="#00F5FF"
-        android:strokeLineJoin="round"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000" />
-
-    <!-- Corner Hex Dots / Nodes -->
-    <path
-        android:pathData="M54,21 L56,23 L54,25 L52,23 Z"
-        android:fillColor="#00F5FF" />
-    <path
-        android:pathData="M54,83 L56,85 L54,87 L52,85 Z"
-        android:fillColor="#8B5CF6" />
-
-    <!-- Solid "N" Left Column (Cyan Neon) -->
-    <path
-        android:pathData="M34,38 L44,31 L44,75 L34,75 Z"
-        android:fillColor="#00F5FF" />
-
-    <!-- Solid "N" Diagonal Dynamic Slash (Sky Cyan) -->
-    <path
-        android:pathData="M42,31 L52,31 L74,69 L64,75 Z"
-        android:fillColor="#38BDF8" />
-
-    <!-- Solid "N" Right Column (Violet Accent) -->
-    <path
-        android:pathData="M64,31 L74,31 L74,68 L64,75 Z"
-        android:fillColor="#8B5CF6" />
-
-    <!-- Core Executive Spark Diamond -->
-    <path
-        android:pathData="M54,49 L58,53 L54,57 L50,53 Z"
-        android:fillColor="#FFFFFF" />
+    <!-- N sólida estilo neón: degradado cian con volumen, sombra y acento de brillo -->
+    <group>
+        <!-- Sombra para dar volumen/solidez -->
+        <group android:translateX="0" android:translateY="2.2">
+            <path
+                android:fillColor="#0A4A5E"
+                android:fillAlpha="0.85"
+                android:pathData="M36,33 h6 a2,2 0 0 1 2,2 v38 a2,2 0 0 1 -2,2 h-6 a2,2 0 0 1 -2,-2 v-38 a2,2 0 0 1 2,-2 z M66,33 h6 a2,2 0 0 1 2,2 v38 a2,2 0 0 1 -2,2 h-6 a2,2 0 0 1 -2,-2 v-38 a2,2 0 0 1 2,-2 z M36,33 h8 l30,30 v12 h-8 l-30,-30 z" />
+        </group>
+        <!-- N principal con degradado neón -->
+        <path android:pathData="M36,33 h6 a2,2 0 0 1 2,2 v38 a2,2 0 0 1 -2,2 h-6 a2,2 0 0 1 -2,-2 v-38 a2,2 0 0 1 2,-2 z M66,33 h6 a2,2 0 0 1 2,2 v38 a2,2 0 0 1 -2,2 h-6 a2,2 0 0 1 -2,-2 v-38 a2,2 0 0 1 2,-2 z M36,33 h8 l30,30 v12 h-8 l-30,-30 z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="54" android:startY="30"
+                    android:endX="54" android:endY="78">
+                    <item android:color="#67E8F9" android:offset="0.0" />
+                    <item android:color="#22D3EE" android:offset="0.45" />
+                    <item android:color="#0891B2" android:offset="1.0" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <!-- Brillo superior (efecto neón caricaturesco) -->
+        <path
+            android:fillColor="#CFFAFE"
+            android:pathData="M37,34.5 h4 a1,1 0 0 1 1,1 v3 a1,1 0 0 1 -1,1 h-4 a1,1 0 0 1 -1,-1 v-3 a1,1 0 0 1 1,-1 z M67,34.5 h4 a1,1 0 0 1 1,1 v3 a1,1 0 0 1 -1,1 h-4 a1,1 0 0 1 -1,-1 v-3 a1,1 0 0 1 1,-1 z" />
+        <!-- Acento punto neón -->
+        <path
+            android:fillColor="#A5F3FC"
+            android:pathData="M78,34.5 a3.2,3.2 0 1 1 -0.01,0 z" />
+    </group>
 </vector>
