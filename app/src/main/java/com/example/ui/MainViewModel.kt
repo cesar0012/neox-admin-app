@@ -509,9 +509,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             REGLAS DE FECHA:
             - Devuelve la fecha en lenguaje natural tal cual se entiende ("viernes", "mañana", "en 3 días", "25/12/2026") o "sin fecha" si el usuario no mencionó ninguna. NUNCA fechas pasadas.
 
-            REGLAS DE HORA:
-            - Si el usuario mencionó hora explícita ("a las 3", "a las 15:30"), devuélvela en formato HH:mm (24h).
-            - Si NO la mencionó, escribe "sin hora" (el sistema pondrá 9:00 por defecto y avisará al usuario).
+            REGLAS DE HORA (CRÍTICAS):
+            - CUALQUIER hora que el usuario mencione —"a las 3", "15:30", "10 am", "10 de la mañana", "3 y media de la tarde", "10 de la noche", "mediodía"— va en la sección HORA en formato HH:mm de 24h. Conversiones: 10 de la mañana=10:00, 3 de la tarde=15:00, 10 pm=22:00, 12 am=00:00, 3 y media=03:30, mediodía=12:00.
+            - La hora que el usuario dice SIEMPRE se agenda en la sección HORA. JAMÁS la consignes únicamente en la DESCRIPCIÓN: si la dijo, es porque quiere que quede agendada a esa hora.
+            - Si el usuario dio SOLO hora sin día, escribe "sin fecha" en FECHA pero la hora SÍ va en HORA (el sistema la agendará).
+            - Si NO mencionó hora, escribe "sin hora" (el sistema pondrá 9:00 por defecto y avisará al usuario).
+            - La DESCRIPCIÓN describe contexto y propósito del pendiente: NUNCA incluyas en ella fechas ni horas.
 
             Responde EXACTAMENTE con este formato (sin texto extra):
             ---TITULO---
@@ -640,33 +643,186 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Texto natural de fecha -> timestamp SIEMPRE futuro; 0 cuando no hay fecha válida.
-     *  Acepta la hora embebida ("mañana a las 11:00") o separada en horaText; sin hora -> 9:00. */
+     *  Acepta la hora embebida ("mañana a las 11:00", "a las 10 de la mañana") o separada en horaText;
+     *  sin hora -> 9:00 por defecto. */
     private fun resolveDateTextToTimestamp(fechaText: String?, horaText: String? = null): Long {
         if (fechaText.isNullOrBlank()) return 0L
         val clean = fechaText.trim().lowercase(Locale.getDefault())
         if (clean == "-" || clean == "sin fecha" || clean == "sin especificar" || clean == "n/a") return 0L
         val resolved = SpanishDateParser.resolveDueTimestamp(clean) ?: return 0L
-        val cal = java.util.Calendar.getInstance().apply { timeInMillis = resolved }
-        val combined = "$clean ${horaText.orEmpty()}"
-        val m = Regex("(\\d{1,2}):(\\d{2})|a\\s+las\\s+(\\d{1,2})\\b").find(combined)
-        return if (m != null) {
-            val h = (m.groupValues[1].ifBlank { m.groupValues[3] }).toIntOrNull()?.coerceIn(0, 23) ?: 9
-            val min = m.groupValues[2].toIntOrNull()?.coerceIn(0, 59) ?: 0
-            cal.set(java.util.Calendar.HOUR_OF_DAY, h)
-            cal.set(java.util.Calendar.MINUTE, min)
-            cal.set(java.util.Calendar.SECOND, 0)
-            cal.timeInMillis
-        } else {
-            // Sin hora explícita: 9:00 por defecto (estable, no depende de la hora actual)
-            cal.set(java.util.Calendar.HOUR_OF_DAY, 9)
-            cal.set(java.util.Calendar.MINUTE, 0)
-            cal.set(java.util.Calendar.SECOND, 0)
-            cal.timeInMillis
+        return applyHourToTimestamp(resolved, parseHourMinutes("$clean ${horaText.orEmpty()}"))
+    }
+
+    /** Sustituye la parte de hora de un timestamp base (deja intactos día/mes/año). */
+    private fun applyHourToTimestamp(base: Long, hm: Pair<Int, Int>?, defaultHour: Int = 9): Long {
+        val (h, min) = hm ?: (defaultHour to 0)
+        val cal = java.util.Calendar.getInstance().apply {
+            timeInMillis = base
+            set(java.util.Calendar.HOUR_OF_DAY, h.coerceIn(0, 23))
+            set(java.util.Calendar.MINUTE, min.coerceIn(0, 59))
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        return cal.timeInMillis
+    }
+
+    /** Siguiente ocurrencia futura de una hora: hoy si aún no pasó, si no mañana. */
+    private fun nextOccurrenceAtHour(hm: Pair<Int, Int>): Long {
+        val today = SpanishDateParser.resolveDueTimestamp("hoy") ?: return applyHourToTimestamp(System.currentTimeMillis(), hm)
+        var due = applyHourToTimestamp(today, hm)
+        if (due <= System.currentTimeMillis()) {
+            val tomorrow = SpanishDateParser.resolveDueTimestamp("mañana")
+                ?: return applyHourToTimestamp(System.currentTimeMillis() + 86_400_000L, hm)
+            due = applyHourToTimestamp(tomorrow, hm)
+        }
+        return due
+    }
+
+    private val meridiemMarker =
+        "(?:a\\.?\\s*m\\.?|p\\.?\\s*m\\.?|de\\s+la\\s+manana|de\\s+la\\s+tarde|de\\s+la\\s+noche)"
+
+    /**
+     * Parser de hora robusto para español. Reconoce: "10:30", "10 am", "10am", "10 p.m.",
+     * "a las 10", "a las 10 en punto", "3 y media", "3 y cuarto de la tarde",
+     * "10 de la mañana / tarde / noche", "15:00 hrs", "mediodía".
+     * @return (hora24, minutos) o null si el texto no menciona hora.
+     */
+    private fun parseHourMinutes(text: String): Pair<Int, Int>? {
+        if (text.isBlank()) return null
+        val t = " " + text.lowercase(Locale.getDefault())
+            .replace("á", "a").replace("é", "e").replace("í", "i")
+            .replace("ó", "o").replace("ú", "u").replace("ñ", "n") + " "
+        if (Regex("\\bmedio\\s*dia\\b").containsMatchIn(t)) return 12 to 0
+
+        // Formato con minutos: "10:30", "10.30", "10:30 pm", "10:30 de la tarde".
+        // El lookbehind/lookahead evita capturar decimales ("1.5 horas") o fechas ("25/12").
+        Regex("(?<![\\d.,/])(\\d{1,2})\\s*[:.]\\s*(\\d{2})\\s*($meridiemMarker)?(?![\\d/])").find(t)?.let { m ->
+            val h = m.groupValues[1].toIntOrNull() ?: return null
+            val min = m.groupValues[2].toIntOrNull() ?: 0
+            return applyMeridiem(h, min, m.groupValues[3])
+        }
+        // Solo hora: "10 am", "a las 10", "3 y media de la tarde", "5 horas".
+        // Solo cuenta si viene "a las", un marcador am/pm/mañana/tarde/noche/u "horas":
+        // un número suelto ("junta de 3 personas") NO es una hora.
+        Regex("(?<![\\d.,/])\\b(a\\s+las?\\s+)?(\\d{1,2})(?:\\s+y\\s+(media|cuarto))?(?:\\s*($meridiemMarker|horas?))?\\b(?![/]\\d)")
+            .findAll(t)
+            .forEach { m ->
+                val hasALas = m.groupValues[1].isNotBlank()
+                val hasMarker = m.groupValues[4].isNotBlank()
+                val hasFraction = m.groupValues[3].isNotBlank()
+                if (!hasALas && !hasMarker && !hasFraction) return@forEach
+                val h = m.groupValues[2].toIntOrNull() ?: return@forEach
+                val min = when {
+                    m.groupValues[3] == "media" -> 30
+                    m.groupValues[3] == "cuarto" -> 15
+                    else -> 0
+                }
+                return applyMeridiem(h, min, m.groupValues[4])
+            }
+        return null
+    }
+
+    /** Convierte hora 12h+meridiano a 24h; sin marcador se asume 24h tal cual. */
+    private fun applyMeridiem(h: Int, min: Int, marker: String): Pair<Int, Int>? {
+        if (h !in 0..23) return null
+        val mk = marker.replace(" ", "").replace(".", "")
+        return when {
+            mk == "pm" || mk == "delatarde" || mk == "delanoche" ->
+                (if (h < 12) h + 12 else h) to min.coerceIn(0, 59)
+            mk == "am" && h == 12 -> 0 to min.coerceIn(0, 59)
+            else -> h to min.coerceIn(0, 59)
         }
     }
 
-    private fun hasExplicitHour(horaText: String?): Boolean =
-        Regex("(\\d{1,2}):(\\d{2})|a\\s+las\\s+\\d{1,2}\\b").containsMatchIn(horaText.orEmpty())
+    private fun hasExplicitHour(horaText: String?): Boolean = parseHourMinutes(horaText.orEmpty()) != null
+
+    /**
+     * Resuelve el nuevo vencimiento para un re-agendado. Reglas:
+     * - fechaTexto con fecha y hora -> esa fecha a esa hora.
+     * - fechaTexto con solo fecha -> esa fecha a las 9:00 (o la hora que traiga).
+     * - fechaTexto con SOLO HORA ("10:00", "10 de la mañana") -> conserva el día actual y mueve la hora;
+     *   si la tarea no tenía fecha, la hora aplica hoy (si aún es futura) o mañana.
+     * - sin nada interpretable -> (0, false): no se toca la fecha.
+     * @return (timestamp, hasTime)
+     */
+    private fun resolveRescheduleDue(fechaText: String, currentDue: Long): Pair<Long, Boolean> {
+        val clean = fechaText.trim().lowercase(Locale.getDefault())
+        if (clean.isBlank() || clean == "-" || clean == "sin fecha" || clean == "sin hora" || clean == "sin cambiar") return 0L to false
+
+        val hm = parseHourMinutes(clean)
+        if (hm == null) {
+            // Sin hora en el texto: requiere una fecha; sin ella no se toca el vencimiento.
+            val base = SpanishDateParser.resolveDueTimestamp(clean) ?: return 0L to false
+            return applyHourToTimestamp(base, null) to false
+        }
+        return when {
+            !hourOnlyText(clean) -> {
+                val base = SpanishDateParser.resolveDueTimestamp(stripHourExpressions(clean))
+                if (base != null) applyHourToTimestamp(base, hm) to true
+                else nextOccurrenceAtHour(hm) to true // fecha irreconocible pero hora válida
+            }
+            currentDue > 0L -> applyHourToTimestamp(currentDue, hm) to true
+            else -> nextOccurrenceAtHour(hm) to true
+        }
+    }
+
+    /** Expresiones que denotan HORA (no fecha): se eliminan del texto antes de parsear fechas. */
+    private val hourStripRegexes = listOf(
+        Regex("(?i)\\ba\\s+las?\\s+\\d{1,2}(?:[:.]\\d{2})?(?:\\s*y\\s+(?:media|cuarto))?(?:\\s*(?:a\\.?\\s*m\\.?|p\\.?\\s*m\\.?|de\\s+la\\s+ma[ñn]ana|de\\s+la\\s+tarde|de\\s+la\\s+noche|en\\s+punto))?\\b"),
+        Regex("(?i)\\b\\d{1,2}[:.]\\d{2}\\b(?:\\s*(?:a\\.?\\s*m\\.?|p\\.?\\s*m\\.?|de\\s+la\\s+ma[ñn]ana|de\\s+la\\s+tarde|de\\s+la\\s+noche))?"),
+        Regex("(?i)\\b\\d{1,2}(?:\\s*y\\s+(?:media|cuarto))?\\s*(?:a\\.?\\s*m\\.?|p\\.?\\s*m\\.?|de\\s+la\\s+ma[ñn]ana|de\\s+la\\s+tarde|de\\s+la\\s+noche|en\\s+punto|horas?)\\b"),
+        Regex("(?i)\\bmedio\\s*d[ií]a\\b")
+    )
+
+    private fun stripHourExpressions(text: String): String =
+        hourStripRegexes.fold(text) { acc, rx -> rx.replace(acc, " ") }
+
+    /**
+     * Red de seguridad determinista sobre la extracción del sub-agente: si el modelo devolvió
+     * "sin fecha" o "sin hora" pero el usuario SÍ los dijo en su mensaje original, se rescatan
+     * del texto. La hora que el usuario menciona SIEMPRE debe quedar agendada en el campo de
+     * vencimiento, nunca perdida ni únicamente en la descripción.
+     */
+    private fun reconcileWithRawText(d: ExtractedTaskDetails, rawText: String): ExtractedTaskDetails {
+        val lower = rawText.lowercase(Locale.getDefault())
+        val hm = parseHourMinutes(lower)
+        var out = d
+
+        if (out.dueTimestamp <= 0L) {
+            // El extractor dijo "sin fecha": quitar la porción de hora del texto (para no
+            // confundir al parser: "10 de la mañana" no es una fecha) y volver a intentar.
+            val textWoHour = if (hm != null) stripHourExpressions(lower) else lower
+            SpanishDateParser.resolveDueTimestamp(textWoHour)?.let { base ->
+                out = out.copy(dueTimestamp = applyHourToTimestamp(base, hm))
+            }
+        } else if (hm != null && !out.hasTime) {
+            // El extractor dijo "sin hora" pero el usuario la dijo: fijarla sobre la fecha extraída.
+            out = out.copy(dueTimestamp = applyHourToTimestamp(out.dueTimestamp, hm), hasTime = true)
+        }
+
+        if (hm != null && out.dueTimestamp <= 0L) {
+            // Sin fecha interpretable pero con hora dicha: hoy (si es futura) o mañana a esa hora.
+            out = out.copy(dueTimestamp = nextOccurrenceAtHour(hm), hasTime = true)
+        }
+        return out
+    }
+
+    /** ¿El texto de fecha es en realidad solo una hora ("10:00", "10 am", "a las 10 de la mañana")? */
+    private fun hourOnlyText(text: String): Boolean {
+        // Una fecha numérica ("25/12", "25-12") o mes nombrado ("25 de diciembre") NO es solo-hora
+        if (Regex("\\b\\d{1,2}\\s*[/-]\\s*\\d{1,2}").containsMatchIn(text)) return false
+        // Quita las expresiones de hora y verifica que no quede ninguna palabra de fecha
+        var rest = stripHourExpressions(text)
+        rest = rest.replace(Regex("\\d+"), " ").replace(Regex("[^a-záéíóúñ ]", RegexOption.IGNORE_CASE), " ")
+        val dateWords = listOf(
+            "hoy", "manana", "mañana", "pasado", "lunes", "martes", "miercoles", "miércoles",
+            "jueves", "viernes", "sabado", "sábado", "domingo", "semana", "mes", "anos", "años",
+            "dia", "día", "dias", "días", "próximo", "proximo", "siguiente", "quincena", "fin",
+            "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+            "septiembre", "octubre", "noviembre", "diciembre", "cada"
+        )
+        return rest.split(Regex("\\s+")).none { it.trim() in dateWords }
+    }
 
     /** Fallback sin LLM: extracción ingenua pero con tipo, confianza MEDIA y sin fecha si no se dijo. */
     private fun naiveTaskExtraction(inputText: String, activeProject: String): ExtractedTaskDetails {
@@ -676,8 +832,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .replace(Regex("\\s+(?:para|el|la)\\s+(?:el\\s+|la\\s+)?(?:pr[oó]xim[oa]\\s+|siguiente\\s+)?(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|mañana|manana|hoy)(?:\\s+que\\s+viene|\\s+pr[oó]xim[oa])?\\s*$", RegexOption.IGNORE_CASE), "")
             .trim().trimEnd('.', '!', '?')
         val title = rawTitle.ifBlank { "Tarea pendiente" }.replaceFirstChar { it.uppercase(Locale.getDefault()) }
-        val withExplicitHour = Regex("\\d{1,2}:\\d{2}|a\\s+las\\s+\\d{1,2}").containsMatchIn(lower)
-        val due = SpanishDateParser.resolveDueTimestamp(lower) ?: 0L
+        val hm = parseHourMinutes(lower)
+        val due = SpanishDateParser.resolveDueTimestamp(if (hm != null) stripHourExpressions(lower) else lower)
+            ?.let { applyHourToTimestamp(it, hm) }
+            ?: hm?.let { nextOccurrenceAtHour(it) }
+            ?: 0L
         return ExtractedTaskDetails(
             title = title,
             description = "Anotada mediante dictado al asistente (sin refinamiento de título por modelo)",
@@ -686,7 +845,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             dueTimestamp = due,
             confidence = ConfidenceLevels.MEDIA,
             viaLLM = false,
-            hasTime = withExplicitHour
+            hasTime = hm != null
         )
     }
 
@@ -1211,7 +1370,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                   * fechaTexto: la fecha en lenguaje natural tal como la entiendes ("viernes", "mañana", "en 3 días", "25/12/2026") o "-" si el usuario NO mencionó fecha.
                   * tipo: TAREA / JUNTA / LLAMADA / ENTREGA / RECORDATORIO (según lo pedido: reunión=junta, llamada telefónica=llamada, deadline o envío=entrega).
                   * confianza: ALTA si el pedido fue claro, MEDIA si ambiguo, BAJA si muy incierto.
-                  * hora: HH:mm (24h) si el usuario la mencionó, o "sin hora" si no.
+                  * hora: HH:mm (24h) si el usuario la mencionó, o "sin hora" si no. Convierte CUALQUIER formato que use ("10 de la mañana"→10:00, "10 am"→10:00, "3 de la tarde"→15:00, "3 y media"→03:30, "10 de la noche"→22:00). La hora SIEMPRE se agenda en este parámetro: NUNCA la dejes únicamente en la descripción o en el texto de tu respuesta.
                 - Para re-agendar/cambiar fecha (incluye cuando el usuario corrige una fecha mal agendada):
                   ---ACTION:RESCHEDULE_TASK|titulo|fechaTexto---
                 - Para concluir tarea: ---ACTION:COMPLETE_TASK|titulo---
@@ -1220,6 +1379,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 - Para re-agendar/cambiar fecha de tarea (incluye cuando el usuario corrige una fecha mal agendada):
                   ---ACTION:RESCHEDULE_TASK|titulo|fechaTexto---
                   * Si el usuario pide cambiar la HORA de varias tareas ("pon esas dos a las 11:00"), emite una línea RESCHEDULE_TASK por cada tarea afectada, manteniendo su fecha y cambiando la hora en fechaTexto (ej: "mañana a las 11:00").
+                  * Si el usuario SOLO cambia la hora ("déjala a las 10 de la mañana", "muévela a las 11"), escribe en fechaTexto únicamente la hora en HH:mm 24h (ej: "10:00"): el sistema conserva el día actual y mueve solo la hora.
                 - Para guardar directiva/especificación/reporte/nota en Memoria:
                   ---ACTION:SAVE_NOTE|titulo|contenido|categoria---
                   * categoria: DIRECTIVA (regla/convención), ESPECIFICACION (requisito técnico), REPORTE (informe) o MEMORIA (apunte general).
@@ -1240,7 +1400,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             CONTEXTO TEMPORAL (REGLA CRÍTICA):
             - FECHA Y HORA ACTUAL: $nowStr.
             - NUNCA agendes nada en fechas pasadas. Cuando el usuario mencione un día de la semana ("viernes"), significa SIEMPRE el PRÓXIMO viernes FUTURO a partir de la FECHA ACTUAL; en fechaTexto escribe el día tal cual ("viernes") y el sistema calcula la fecha exacta.
-            - Si el usuario no menciona fecha, usa "-" como fechaTexto: la junta/tarea queda pendiente SIN fecha (aparece en tareas, no en calendario).
+            - REGLA ABSOLUTA DE HORA: la hora que el usuario menciona ("a las 10 de la mañana", "10 am", "3 y media") SIEMPRE se agenda — en el parámetro hora de CREATE_TASK o en fechaTexto de RESCHEDULE_TASK. JAMÁS queda únicamente mencionada en la descripción del pendiente ni solo en tu texto de respuesta: si el usuario la dijo, es porque quiere que quede agendada a esa hora.
+            - Si el usuario no menciona fecha, usa "-" como fechaTexto: la junta/tarea queda pendiente SIN fecha (aparece en tareas, no en calendario). Si menciona SOLO hora sin día, también usa "-" y la hora igualmente: el sistema la agendará a esa hora.
             - Si el usuario corrige una fecha ("no, es para el siguiente viernes"), re-agenda la tarea con RESCHEDULE_TASK en lugar de crear una nueva.
 
             INSTRUCCIONES CLAVE DE FORMATO Y ESTILO:
@@ -1330,9 +1491,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val parts = payload.split("|")
                 val title = parts.getOrNull(0)?.trim()?.ifBlank { "Nueva tarea" } ?: "Nueva tarea"
                 val priority = parts.getOrNull(1)?.trim()?.uppercase(Locale.getDefault()) ?: "MEDIA"
+                val fechaRaw = parts.getOrNull(2)?.trim().orEmpty()
                 val horaRaw = parts.getOrNull(5)?.trim().orEmpty()
-                val due = resolveDateTextToTimestamp(parts.getOrNull(2), horaRaw)
-                val withTime = hasExplicitHour(horaRaw)
+                // La hora puede venir en el parámetro hora O embebida en fechaTexto:
+                // se considera explícita si aparece en cualquiera de los dos.
+                val hm = parseHourMinutes("$fechaRaw $horaRaw")
+                var due = resolveDateTextToTimestamp(fechaRaw, horaRaw)
+                var withTime = hm != null
+                if (due <= 0L && hm != null) {
+                    // El modelo dejó la fecha vacía pero el usuario SÍ dio hora:
+                    // se agenda hoy a esa hora (si aún es futura) o mañana, nunca se pierde.
+                    due = nextOccurrenceAtHour(hm)
+                    withTime = true
+                }
                 val typeRaw = parts.getOrNull(3)?.trim()?.uppercase(Locale.getDefault()).orEmpty()
                 val confRaw = parts.getOrNull(4)?.trim()?.uppercase(Locale.getDefault()).orEmpty()
 
@@ -1361,9 +1532,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             "RESCHEDULE_TASK" -> {
                 // ACTION:RESCHEDULE_TASK|titulo|fechaTexto
+                // fechaTexto puede traer fecha+hora ("mañana a las 10"), solo fecha ("viernes")
+                // o SOLO HORA ("10:00", "10 de la mañana"): en ese caso se conserva el día actual
+                // y solo se mueve la hora. Nunca se deja la tarea sin fecha por un re-agendado.
                 val parts = payload.split("|")
                 val titleKeyword = parts.getOrNull(0)?.trim()?.lowercase(Locale.getDefault()).orEmpty()
-                val due = resolveDateTextToTimestamp(parts.getOrNull(1))
+                val fechaText = parts.getOrNull(1)?.trim().orEmpty()
                 val projectTasks = db.taskDao().getTasksByJobSync(activeProject)
                 val target = projectTasks.firstOrNull {
                     titleKeyword.isNotBlank() && it.title.lowercase(Locale.getDefault()).contains(titleKeyword)
@@ -1371,8 +1545,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ?: projectTasks.maxByOrNull { it.createdAt }
 
                 if (target != null) {
-                    db.taskDao().updateTaskDue(target.id, due)
-                    "\n\n✅ *[Acción ejecutada: Tarea \"${target.title}\" re-agendada: ${formatDueForHumans(due)} en $activeProject]*"
+                    val (due, withTime) = resolveRescheduleDue(fechaText, target.dueTimestamp)
+                    if (due > 0L) {
+                        db.taskDao().updateTask(
+                            target.copy(
+                                dueTimestamp = due,
+                                hasTime = withTime || target.hasTime
+                            )
+                        )
+                        val horaTxt = if (withTime) "" else " *(sin hora específica: 9:00 por defecto)*"
+                        "\n\n✅ *[Acción ejecutada: Tarea \"${target.title}\" re-agendada: ${formatDueForHumans(due)}$horaTxt en $activeProject]*"
+                    } else {
+                        ""
+                    }
                 } else {
                     ""
                 }
@@ -1529,7 +1714,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lower.contains("mal agendada") || lower.contains("mal agendado") || lower.contains("la agendaste") ||
             lower.contains("deberia ser") || lower.contains("debería ser") || lower.contains("es para el") ||
             lower.contains("es para la") || lower.contains("es para este") || lower.contains("es para ma"))
-        val parsedDue = SpanishDateParser.resolveDueTimestamp(lower)
+        val reschedHour = parseHourMinutes(lower)
+        val parsedDue = SpanishDateParser.resolveDueTimestamp(if (reschedHour != null) stripHourExpressions(lower) else lower)
         if (isRescheduleIntent && parsedDue != null && startsWithImperative && activeProject != "Todos") {
             val projectTasks = db.taskDao().getTasksByJobSync(activeProject)
             val target = projectTasks.firstOrNull { t -> t.title.lowercase(Locale.getDefault()).isNotBlank() && lower.contains(t.title.lowercase(Locale.getDefault()).take(18)) }
@@ -1537,7 +1723,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ?: projectTasks.maxByOrNull { it.createdAt }
 
             if (target != null) {
-                db.taskDao().updateTaskDue(target.id, parsedDue)
+                // La hora dicha por el usuario se aplica SIEMPRE; sin hora explícita, 9:00 por defecto
+                val due = applyHourToTimestamp(parsedDue, reschedHour)
+                db.taskDao().updateTask(
+                    target.copy(dueTimestamp = due, hasTime = reschedHour != null || target.hasTime)
+                )
                 val dateFmt = SimpleDateFormat("EEEE d 'de' MMMM, HH:mm", Locale("es", "ES")).format(Date(parsedDue))
                 return "📅 **Tarea Re-agendada:**\nCorregí la fecha de la tarea:\n• **\"${target.title}\"**\nNuevo vencimiento: **$dateFmt** (proyecto **$activeProject**).\n\nSi no era esta tarea, dime su nombre y la fecha correcta."
             }
@@ -1565,8 +1755,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // El sub-agente determinó que no es una orden de agenda: que responda el LLM con contexto
             if (extraction is TaskExtraction.NotATaskRequest) return null
 
-            val extracted = (extraction as? TaskExtraction.Details)?.details
-                ?: naiveTaskExtraction(inputText, activeProject)
+            val extracted = ((extraction as? TaskExtraction.Details)?.details
+                ?: naiveTaskExtraction(inputText, activeProject))
+                .let { reconcileWithRawText(it, inputText) }
 
             val task = WorkTask(
                 title = extracted.title,
