@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.rotator.ModelCandidate
 import com.example.ui.MainViewModel
+import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
@@ -175,7 +176,7 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
 
                         Button(
                             onClick = { viewModel.refreshRotatorCatalog() },
-                            colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                            colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
                             modifier = Modifier.weight(1.2f).testTag("rotator_refresh_btn")
                         ) {
                             Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(15.dp))
@@ -402,7 +403,7 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
                                 viewModel.rotator.updateConfig(localhostEnabled = it)
                             },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color(0xFF00363D),
+                                checkedThumbColor = OnCyan,
                                 checkedTrackColor = CyanNeon
                             )
                         )

@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.MainActivity
 import com.example.OmniWorkApp
+import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.MyApplicationTheme
@@ -236,7 +237,7 @@ fun CrashReportContent(
                 .fillMaxWidth()
                 .height(280.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(Color(0xFF090D16))
+                .background(Slate950)
                 .border(1.dp, Slate700, RoundedCornerShape(10.dp))
                 .padding(12.dp)
         ) {
@@ -258,7 +259,7 @@ fun CrashReportContent(
             onClick = onCopy,
             colors = ButtonDefaults.buttonColors(
                 containerColor = CyanNeon,
-                contentColor = Color(0xFF00363D)
+                contentColor = OnCyan
             ),
             modifier = Modifier.fillMaxWidth()
         ) {

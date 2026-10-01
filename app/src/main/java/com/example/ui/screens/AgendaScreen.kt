@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PlayArrow
@@ -105,6 +106,7 @@ import com.example.data.model.MeetingNote
 import com.example.data.model.TaskTypes
 import com.example.data.model.WorkTask
 import com.example.ui.MainViewModel
+import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
@@ -300,7 +302,7 @@ fun AgendaScreen(viewModel: MainViewModel) {
         FloatingActionButton(
             onClick = { showAddTaskDialog = true },
             containerColor = CyanNeon,
-            contentColor = Color(0xFF00363D),
+            contentColor = OnCyan,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(20.dp)
@@ -832,20 +834,20 @@ fun AgendaCalendarView(
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text(
                                                 text = "$dayNum",
-                                                color = if (isSelected) Color(0xFF00363D) else TextPrimary,
+                                                color = if (isSelected) OnCyan else TextPrimary,
                                                 fontSize = 12.sp,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                             )
                                             // Dots indicator
                                             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                                 if (hasPending) {
-                                                    Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(if (isSelected) Color(0xFF00363D) else AmberWarning))
+                                                    Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(if (isSelected) OnCyan else AmberWarning))
                                                 }
                                                 if (hasMeetings) {
-                                                    Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(if (isSelected) Color(0xFF00363D) else VioletAccent))
+                                                    Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(if (isSelected) OnCyan else VioletAccent))
                                                 }
                                                 if (hasCompleted && !hasPending) {
-                                                    Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(if (isSelected) Color(0xFF00363D) else EmeraldSuccess))
+                                                    Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(if (isSelected) OnCyan else EmeraldSuccess))
                                                 }
                                             }
                                         }
@@ -1114,7 +1116,7 @@ fun KanbanColumnContainer(
                         .background(color)
                         .padding(horizontal = 7.dp, vertical = 2.dp)
                 ) {
-                    Text("$count", color = Color(0xFF00363D), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("$count", color = OnCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -1342,7 +1344,7 @@ fun KanbanTaskDetailModal(
                         onClick = { onUpdateStatus("PENDIENTE") },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isPendiente) AmberWarning else Slate800,
-                            contentColor = if (isPendiente) Color(0xFF00363D) else AmberWarning
+                            contentColor = if (isPendiente) OnCyan else AmberWarning
                         ),
                         border = if (!isPendiente) ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(AmberWarning.copy(alpha = 0.5f))) else null,
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
@@ -1359,7 +1361,7 @@ fun KanbanTaskDetailModal(
                         onClick = { onUpdateStatus("EN_PROCESO") },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isInProceso) CyanNeon else Slate800,
-                            contentColor = if (isInProceso) Color(0xFF00363D) else CyanNeon
+                            contentColor = if (isInProceso) OnCyan else CyanNeon
                         ),
                         border = if (!isInProceso) ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(CyanNeon.copy(alpha = 0.5f))) else null,
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
@@ -1986,7 +1988,7 @@ fun TaskCard(
 @Composable
 fun FilterChip(label: String, isSelected: Boolean, onClick: () -> Unit, leadingIcon: ImageVector? = null) {
     val bg = if (isSelected) CyanNeon else Slate900
-    val textColor = if (isSelected) Color(0xFF00363D) else Slate400
+    val textColor = if (isSelected) OnCyan else Slate400
     val border = if (isSelected) CyanNeon else Slate700
 
     Box(
@@ -2002,7 +2004,7 @@ fun FilterChip(label: String, isSelected: Boolean, onClick: () -> Unit, leadingI
                 Icon(
                     leadingIcon,
                     contentDescription = null,
-                    tint = if (isSelected) Color(0xFF00363D) else CyanNeon,
+                    tint = if (isSelected) OnCyan else CyanNeon,
                     modifier = Modifier.size(13.dp)
                 )
             }
@@ -2016,6 +2018,35 @@ fun FilterChip(label: String, isSelected: Boolean, onClick: () -> Unit, leadingI
             )
         }
     }
+}
+
+/** Input estilizado para diálogos: relleno, redondeado y con icono. */
+@Composable
+private fun NeoxInput(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    maxLines: Int = 1
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label, color = Slate400, fontSize = 12.sp) },
+        leadingIcon = { Icon(icon, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp)) },
+        shape = RoundedCornerShape(12.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = TextPrimary,
+            unfocusedTextColor = TextPrimary,
+            focusedBorderColor = CyanNeon,
+            unfocusedBorderColor = Slate700,
+            focusedContainerColor = Slate800,
+            unfocusedContainerColor = Slate800
+        ),
+        modifier = modifier.fillMaxWidth(),
+        maxLines = maxLines
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -2047,30 +2078,19 @@ fun AddTaskDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
             ) {
-                OutlinedTextField(
+                NeoxInput(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("¿Qué tienes que hacer?", color = Slate400) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = CyanNeon,
-                        unfocusedBorderColor = Slate700
-                    ),
-                    modifier = Modifier.fillMaxWidth().testTag("task_title_input")
+                    label = "¿Qué tienes que hacer?",
+                    icon = Icons.Default.Edit,
+                    modifier = Modifier.testTag("task_title_input")
                 )
 
-                OutlinedTextField(
+                NeoxInput(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Detalle o contexto adicional", color = Slate400) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = CyanNeon,
-                        unfocusedBorderColor = Slate700
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
+                    label = "Detalle o contexto adicional",
+                    icon = Icons.Default.Notes,
                     maxLines = 3
                 )
 
@@ -2131,7 +2151,7 @@ fun AddTaskDialog(
                         onSave(title, description, selectedJob, selectedDue, selectedPriority, selectedType, selectedHasTime)
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
                 modifier = Modifier.testTag("save_task_btn")
             ) {
                 Text("Guardar Tarea", fontWeight = FontWeight.Bold)
@@ -2175,30 +2195,18 @@ fun EditTaskDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
             ) {
-                OutlinedTextField(
+                NeoxInput(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Título", color = Slate400) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = CyanNeon,
-                        unfocusedBorderColor = Slate700
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+                    label = "Título",
+                    icon = Icons.Default.Edit
                 )
 
-                OutlinedTextField(
+                NeoxInput(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Descripción", color = Slate400) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = CyanNeon,
-                        unfocusedBorderColor = Slate700
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
+                    label = "Descripción",
+                    icon = Icons.Default.Notes,
                     maxLines = 3
                 )
 
@@ -2259,7 +2267,7 @@ fun EditTaskDialog(
                         onSave(title, description, selectedType, selectedPriority, selectedDue, selectedJob, selectedHasTime)
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
+                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan)
             ) {
                 Text("Guardar Cambios", fontWeight = FontWeight.Bold)
             }

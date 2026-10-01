@@ -41,6 +41,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.MainViewModel
+import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
@@ -132,7 +133,7 @@ fun SecurityLockScreen(
                         }
                     },
                     modifier = Modifier.fillMaxWidth().testTag("unlock_submit_btn"),
-                    colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
+                    colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan)
                 ) {
                     Text("Desbloquear Asistente", fontWeight = FontWeight.Bold)
                 }
@@ -189,7 +190,7 @@ fun SecuritySettingsDialog(
                     viewModel.prefs.setRetentionDays(selectedRetention)
                     onDismiss()
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
+                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan)
             ) {
                 Text("Guardar Cambios", fontWeight = FontWeight.Bold)
             }

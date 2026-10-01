@@ -50,8 +50,6 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -72,6 +70,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.example.data.speech.SpeechContextPolisher
+import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
@@ -515,13 +514,6 @@ fun VoiceDictationDialog(
                         }
                     }
 
-                    val editFocusRequester = remember { FocusRequester() }
-                    LaunchedEffect(isEditing) {
-                        if (isEditing) {
-                            try { editFocusRequester.requestFocus() } catch (_: Exception) {}
-                        }
-                    }
-
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -533,31 +525,36 @@ fun VoiceDictationDialog(
                                 if (isEditing) AmberWarning.copy(alpha = 0.55f) else Slate800,
                                 RoundedCornerShape(14.dp)
                             )
-                            .clickable(enabled = !isEditing) { startEditing() }
                             .verticalScroll(scrollState)
                             .padding(12.dp)
                     ) {
-                        when {
-                            isEditing -> {
-                                BasicTextField(
-                                    value = editText,
-                                    onValueChange = { editText = it },
-                                    textStyle = TextStyle(color = TextPrimary, fontSize = 15.sp, lineHeight = 22.sp),
-                                    cursorBrush = SolidColor(CyanNeon),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .focusRequester(editFocusRequester)
-                                )
-                            }
-                            composedText.isBlank() -> {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Default.Mic, contentDescription = null, tint = Slate700, modifier = Modifier.size(28.dp))
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text("Habla, o toca aquí para escribir y corregir manualmente...", color = Slate700, fontSize = 12.sp)
-                                }
-                            }
-                            else -> {
-                                Column {
+                        // El campo SIEMPRE está compuesto (solo cambia su tamaño y editabilidad).
+                        // Crear/destruir el nodo al alternar edición rompía el árbol de foco dentro
+                        // del Dialog ("ActiveParent with no focused child") y crasheaba al tocar.
+                        BasicTextField(
+                            value = if (isEditing) editText else "",
+                            onValueChange = { if (isEditing) editText = it },
+                            readOnly = !isEditing,
+                            textStyle = TextStyle(color = TextPrimary, fontSize = 15.sp, lineHeight = 22.sp),
+                            cursorBrush = SolidColor(CyanNeon),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(if (isEditing) Modifier else Modifier.height(2.dp))
+                        )
+
+                        if (!isEditing) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { startEditing() }
+                            ) {
+                                if (composedText.isBlank()) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                        Icon(Icons.Default.Mic, contentDescription = null, tint = Slate700, modifier = Modifier.size(28.dp))
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text("Habla, o toca aquí para escribir y corregir manualmente...", color = Slate700, fontSize = 12.sp)
+                                    }
+                                } else {
                                     if (finalizedText.isNotBlank()) {
                                         Text(
                                             text = finalizedText,
@@ -613,7 +610,7 @@ fun VoiceDictationDialog(
                     Button(
                         onClick = { sendNow() },
                         enabled = composedText.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .fillMaxWidth()

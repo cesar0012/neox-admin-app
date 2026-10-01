@@ -83,6 +83,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.rag.RAGQueryResult
 import com.example.ui.ChatMessage
 import com.example.ui.MainViewModel
+import com.example.ui.theme.BubbleUserBg
+import com.example.ui.theme.OnBubbleUser
+import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
@@ -222,7 +225,7 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                         icon = Icons.Default.Folder,
                         selected = assistantProject == pName,
                         accent = CyanNeon,
-                        onAccent = Color(0xFF00363D),
+                        onAccent = OnCyan,
                         onClick = { viewModel.setAssistantProject(pName) }
                     )
                 }
@@ -698,7 +701,7 @@ private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
                     viewModel.updateTtsSettings(rate = localRate, pitch = localPitch, voiceName = localVoice ?: savedVoice)
                     onDismiss()
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Text("Guardar", fontWeight = FontWeight.Bold)
@@ -828,7 +831,7 @@ fun CleanChatBubble(message: ChatMessage, onSpeak: () -> Unit) {
                 bottomEnd = if (isUser) 4.dp else 14.dp
             ),
             colors = CardDefaults.cardColors(
-                containerColor = if (isUser) Color(0xFF0369A1) else Slate900
+                containerColor = if (isUser) BubbleUserBg else Slate900
             ),
             border = if (isUser) null else CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate800)),
             modifier = Modifier
@@ -863,7 +866,7 @@ fun CleanChatBubble(message: ChatMessage, onSpeak: () -> Unit) {
 
                 Text(
                     text = message.text,
-                    color = TextPrimary,
+                    color = if (isUser) OnBubbleUser else TextPrimary,
                     fontSize = 13.sp,
                     lineHeight = 19.sp
                 )

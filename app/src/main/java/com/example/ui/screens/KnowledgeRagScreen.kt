@@ -62,6 +62,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.DocumentItem
 import com.example.data.rag.RAGQueryResult
 import com.example.ui.MainViewModel
+import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
@@ -282,7 +283,7 @@ fun KnowledgeRagScreen(viewModel: MainViewModel) {
         FloatingActionButton(
             onClick = { showAddDocDialog = true },
             containerColor = CyanNeon,
-            contentColor = Color(0xFF00363D),
+            contentColor = OnCyan,
             modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp).testTag("add_doc_fab")
         ) {
             Icon(Icons.Default.Add, contentDescription = "Adjuntar documento")
@@ -526,7 +527,7 @@ fun AddOrEditDocumentDialog(
                         onSave(title, selectedJob, selectedCategory, content)
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
+                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan)
             ) {
                 Text(if (isEditing) "Actualizar e Indexar" else "Guardar e Indexar", fontWeight = FontWeight.Bold)
             }

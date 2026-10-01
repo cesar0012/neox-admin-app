@@ -75,3 +75,10 @@ val RoseError: Color get() = if (NeoxThemeState.isDark) DarkPalette.rose else Li
 
 /** Texto principal sobre superficies: blanco en dark, casi-negro en light. */
 val TextPrimary: Color get() = if (NeoxThemeState.isDark) DarkPalette.textPrimary else LightPalette.textPrimary
+
+/** Color "encima del cian": teal oscuro sobre el cian neón (dark), blanco sobre el cian profundo (light). */
+val OnCyan: Color get() = if (NeoxThemeState.isDark) Color(0xFF00363D) else Color(0xFFFFFFFF)
+
+/** Burbuja del usuario en el chat: azul fijo en ambos temas, con texto claro fijo. */
+val BubbleUserBg: Color get() = Color(0xFF0369A1)
+val OnBubbleUser: Color get() = Color(0xFFE0F2FE)

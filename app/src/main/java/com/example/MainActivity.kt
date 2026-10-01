@@ -93,6 +93,7 @@ import com.example.ui.screens.RotatorStatusScreen
 import com.example.ui.screens.SecurityLockScreen
 import com.example.ui.screens.SecuritySettingsDialog
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
@@ -361,7 +362,7 @@ class MainActivity : ComponentActivity() {
                                         clipboard.setPrimaryClip(clip)
                                         android.widget.Toast.makeText(context, "¡Copiado al portapapeles!", android.widget.Toast.LENGTH_SHORT).show()
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
+                                    colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan)
                                 ) {
                                     Text("Copiar Error", fontWeight = FontWeight.Bold)
                                 }
@@ -453,7 +454,7 @@ fun ProjectsManagementDialog(
                             }
                         },
                         enabled = newProjectName.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -520,7 +521,7 @@ fun ProjectsManagementDialog(
         confirmButton = {
             Button(
                 onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Text("Listo", fontWeight = FontWeight.Bold)

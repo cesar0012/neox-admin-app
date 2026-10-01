@@ -80,6 +80,7 @@ import com.example.data.model.VaultEntry
 import com.example.data.speech.SpeechContextPolisher
 import com.example.service.FloatingMeetingService
 import com.example.ui.MainViewModel
+import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
@@ -273,7 +274,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                     ) {
                                         Text(
                                             text = pName,
-                                            color = if (isSelected) Color(0xFF00363D) else Slate400,
+                                            color = if (isSelected) OnCyan else Slate400,
                                             fontSize = 11.sp,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                         )
@@ -341,11 +342,11 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                         }
                                     },
                                     enabled = liveTranscriptText.isNotBlank() && !isProcessing,
-                                    colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                                    colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
                                     modifier = Modifier.weight(1.3f).testTag("process_summary_btn")
                                 ) {
                                     if (isProcessing) {
-                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color(0xFF00363D), strokeWidth = 2.dp)
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = OnCyan, strokeWidth = 2.dp)
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text("Procesando...", fontSize = 12.sp)
                                     } else {
@@ -383,7 +384,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                     ) {
                         Text(
                             text = "Minutas Generadas (${meetings.size})",
-                            color = if (selectedMinutasSubTab == 0) Color(0xFF00363D) else Slate400,
+                            color = if (selectedMinutasSubTab == 0) OnCyan else Slate400,
                             fontSize = 12.sp,
                             fontWeight = if (selectedMinutasSubTab == 0) FontWeight.Bold else FontWeight.Medium
                         )
@@ -400,7 +401,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                     ) {
                         Text(
                             text = "Bóveda 10 Días (${vaultEntries.size})",
-                            color = if (selectedMinutasSubTab == 1) Color(0xFF00363D) else Slate400,
+                            color = if (selectedMinutasSubTab == 1) OnCyan else Slate400,
                             fontSize = 12.sp,
                             fontWeight = if (selectedMinutasSubTab == 1) FontWeight.Bold else FontWeight.Medium
                         )
@@ -436,7 +437,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                         ) {
                                             Text(
                                                 text = "Todos (${meetings.size})",
-                                                color = if (isSel) Color(0xFF00363D) else Slate400,
+                                                color = if (isSel) OnCyan else Slate400,
                                                 fontSize = 11.sp,
                                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
                                             )
@@ -455,7 +456,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                         ) {
                                             Text(
                                                 text = "${jobItem.name} ($count)",
-                                                color = if (isSel) Color(0xFF00363D) else Slate400,
+                                                color = if (isSel) OnCyan else Slate400,
                                                 fontSize = 11.sp,
                                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
                                             )
@@ -653,7 +654,7 @@ private fun EditMeetingDialog(
         confirmButton = {
             Button(
                 onClick = { if (title.isNotBlank()) onSave(title, selectedJob) },
-                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D))
+                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan)
             ) {
                 Text("Guardar Cambios", fontWeight = FontWeight.Bold)
             }

@@ -51,6 +51,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.MainViewModel
+import com.example.ui.theme.Slate950
+import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
@@ -153,7 +155,7 @@ fun DesktopBridgeScreen(viewModel: MainViewModel) {
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isRunning) Slate800 else EmeraldSuccess,
-                            contentColor = if (isRunning) RoseError else Color(0xFF00363D)
+                            contentColor = if (isRunning) RoseError else OnCyan
                         ),
                         modifier = Modifier.fillMaxWidth().testTag("toggle_webhook_btn")
                     ) {
@@ -200,7 +202,7 @@ fun DesktopBridgeScreen(viewModel: MainViewModel) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF030712))
+                            .background(Slate950)
                             .padding(12.dp)
                     ) {
                         Column {
@@ -270,7 +272,7 @@ fun DesktopBridgeScreen(viewModel: MainViewModel) {
                     // Button 2: Chrome Extension ZIP
                     Button(
                         onClick = { viewModel.exportChromeExtension(context) },
-                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = Color(0xFF00363D)),
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
                         modifier = Modifier.fillMaxWidth().testTag("export_chrome_zip_btn")
                     ) {
                         Icon(Icons.Default.FolderZip, contentDescription = null, modifier = Modifier.size(16.dp))
