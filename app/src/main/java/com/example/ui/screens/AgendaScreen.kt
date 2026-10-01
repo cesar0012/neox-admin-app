@@ -101,6 +101,7 @@ import com.example.data.model.MeetingNote
 import com.example.data.model.TaskTypes
 import com.example.data.model.WorkTask
 import com.example.ui.MainViewModel
+import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
@@ -392,7 +393,7 @@ fun AgendaListView(
                             )
                             Text(
                                 text = "Mi Agenda Diaria",
-                                color = Color.White,
+                                color = TextPrimary,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -469,7 +470,7 @@ fun AgendaListView(
                         Column {
                             Text(
                                 text = if (urgentCount > 0) "Alertas de entrega activas ($urgentCount)" else "Supervisión proactiva al día",
-                                color = Color.White,
+                                color = TextPrimary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -516,7 +517,7 @@ fun AgendaListView(
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Default.FilterList, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp))
-                            Text("Filtros", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Filtros", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
                             // Compact summary pills when collapsed
                             if (!isFiltersExpanded) {
@@ -622,7 +623,7 @@ fun AgendaListView(
         item {
             Text(
                 text = "Tareas (${tasks.size})",
-                color = Color.White,
+                color = TextPrimary,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -753,7 +754,7 @@ fun AgendaCalendarView(
 
                         Text(
                             text = monthName,
-                            color = Color.White,
+                            color = TextPrimary,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -827,7 +828,7 @@ fun AgendaCalendarView(
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text(
                                                 text = "$dayNum",
-                                                color = if (isSelected) Color(0xFF00363D) else Color.White,
+                                                color = if (isSelected) Color(0xFF00363D) else TextPrimary,
                                                 fontSize = 12.sp,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                             )
@@ -866,7 +867,7 @@ fun AgendaCalendarView(
             ) {
                 Text(
                     text = "Eventos del $selectedDateStr",
-                    color = Color.White,
+                    color = TextPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -1197,7 +1198,7 @@ fun KanbanItemCard(
 
             Text(
                 text = task.title,
-                color = Color.White,
+                color = TextPrimary,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2
@@ -1283,7 +1284,7 @@ fun KanbanTaskDetailModal(
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(task.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(task.title, color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             }
         },
         text = {
@@ -1297,7 +1298,7 @@ fun KanbanTaskDetailModal(
                         .padding(10.dp)
                 ) {
                     Text("Fecha de Entrega:", color = Slate400, fontSize = 11.sp)
-                    Text(fullDateFormat.format(Date(task.dueTimestamp)), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(fullDateFormat.format(Date(task.dueTimestamp)), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
 
                     if (task.originReference.isNotBlank()) {
                         Spacer(modifier = Modifier.height(6.dp))
@@ -1325,7 +1326,7 @@ fun KanbanTaskDetailModal(
                 }
 
                 // Interactive Status Manager with REAL BUTTONS
-                Text("Gestionar Estado del Proceso:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Gestionar Estado del Proceso:", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1371,7 +1372,7 @@ fun KanbanTaskDetailModal(
                         onClick = { onUpdateStatus("TERMINADO") },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isTerminado) EmeraldSuccess else Slate800,
-                            contentColor = if (isTerminado) Color.White else EmeraldSuccess
+                            contentColor = if (isTerminado) TextPrimary else EmeraldSuccess
                         ),
                         border = if (!isTerminado) ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(EmeraldSuccess.copy(alpha = 0.5f))) else null,
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
@@ -1387,7 +1388,7 @@ fun KanbanTaskDetailModal(
         confirmButton = {
             Button(
                 onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = Slate800, contentColor = Color.White)
+                colors = ButtonDefaults.buttonColors(containerColor = Slate800, contentColor = TextPrimary)
             ) {
                 Text("Cerrar")
             }
@@ -1431,7 +1432,7 @@ fun AgendaCollapsibleTreeView(
                 border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate800))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Diagrama Jerárquico de Entregas", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("Diagrama Jerárquico de Entregas", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Toca cada bloque para desplegar las tareas y acuerdos correspondientes:",
@@ -1561,7 +1562,7 @@ fun AgendaCollapsibleTreeView(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(meeting.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(meeting.title, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                                     Text(meeting.jobTag, color = CyanNeon, fontSize = 10.sp)
                                 }
                                 Box(
@@ -1612,7 +1613,7 @@ fun CollapsibleSectionCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(color))
-                    Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(title, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
@@ -1658,7 +1659,7 @@ fun DiagramTaskCard(
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(task.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(task.title, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
@@ -1896,7 +1897,7 @@ fun TaskCard(
 
                     Text(
                         text = task.title,
-                        color = if (task.isCompleted || task.status == "TERMINADO") Slate400 else Color.White,
+                        color = if (task.isCompleted || task.status == "TERMINADO") Slate400 else TextPrimary,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         textDecoration = if (task.isCompleted || task.status == "TERMINADO") TextDecoration.LineThrough else TextDecoration.None
@@ -2024,7 +2025,7 @@ fun AddTaskDialog(
         onDismissRequest = onDismiss,
         containerColor = Slate900,
         title = {
-            Text("Nueva Tarea / Indicación", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("Nueva Tarea / Indicación", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2033,8 +2034,8 @@ fun AddTaskDialog(
                     onValueChange = { title = it },
                     label = { Text("¿Qué tienes que hacer?", color = Slate400) },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                         focusedBorderColor = CyanNeon,
                         unfocusedBorderColor = Slate700
                     ),
@@ -2046,8 +2047,8 @@ fun AddTaskDialog(
                     onValueChange = { description = it },
                     label = { Text("Detalle o contexto adicional", color = Slate400) },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                         focusedBorderColor = CyanNeon,
                         unfocusedBorderColor = Slate700
                     ),
@@ -2140,7 +2141,7 @@ fun EditTaskDialog(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.Default.Edit, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp))
-                Text("Editar ${TaskTypes.labelOf(selectedType)}", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text("Editar ${TaskTypes.labelOf(selectedType)}", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             }
         },
         text = {
@@ -2150,8 +2151,8 @@ fun EditTaskDialog(
                     onValueChange = { title = it },
                     label = { Text("Título", color = Slate400) },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                         focusedBorderColor = CyanNeon,
                         unfocusedBorderColor = Slate700
                     ),
@@ -2163,8 +2164,8 @@ fun EditTaskDialog(
                     onValueChange = { description = it },
                     label = { Text("Descripción", color = Slate400) },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                         focusedBorderColor = CyanNeon,
                         unfocusedBorderColor = Slate700
                     ),
@@ -2342,7 +2343,7 @@ private fun DueDateTimeEditor(
         AlertDialog(
             onDismissRequest = { showTimePicker = false },
             containerColor = Slate900,
-            title = { Text("Hora de la tarea", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold) },
+            title = { Text("Hora de la tarea", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TimePicker(state = timePickerState)

@@ -83,6 +83,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.rag.RAGQueryResult
 import com.example.ui.ChatMessage
 import com.example.ui.MainViewModel
+import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.Slate400
@@ -145,7 +146,7 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                         Icon(Icons.Default.SmartToy, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp))
                     }
                     Column {
-                        Text("Neox Asistente", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("Neox Asistente", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         Text(
                             text = when {
                                 isProcessing -> "Procesando tu mensaje..."
@@ -255,7 +256,7 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                             Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(12.dp))
                             Text(
                                 text = currentSession?.title?.take(28) ?: "Conversación",
-                                color = Color.White,
+                                color = TextPrimary,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1
@@ -276,7 +277,7 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                                     Text(
                                         s.title.take(40),
                                         fontSize = 12.sp,
-                                        color = if (s.id == activeSessionId) CyanNeon else Color.White,
+                                        color = if (s.id == activeSessionId) CyanNeon else TextPrimary,
                                         maxLines = 1
                                     )
                                 },
@@ -487,8 +488,8 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
                     placeholder = { Text("Escribe o habla al asistente...", color = Slate400, fontSize = 13.sp) },
                     modifier = Modifier.weight(1f).testTag("chat_input_text"),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                         focusedBorderColor = Color.Transparent,
                         unfocusedBorderColor = Color.Transparent
                     ),
@@ -564,7 +565,7 @@ private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
                     Icon(Icons.Default.Tune, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp))
                 }
                 Column {
-                    Text("Ajustes de Voz", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Ajustes de Voz", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     Text("Prueba antes de guardar; Cancelar revierte todo", color = Slate400, fontSize = 10.sp)
                 }
             }
@@ -580,7 +581,7 @@ private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.Default.Speed, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(15.dp))
-                            Text("Velocidad", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Velocidad", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                         Box(
                             modifier = Modifier
@@ -608,7 +609,7 @@ private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.Default.GraphicEq, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(15.dp))
-                            Text("Tono", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Tono", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                         Box(
                             modifier = Modifier
@@ -630,7 +631,7 @@ private fun TtsSettingsDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
                 // ── Voz (lista estilo radio) ──
                 Text(
                     text = "Voz · ${voices.size} en español",
-                    color = Color.White,
+                    color = TextPrimary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -742,7 +743,7 @@ private fun VoiceOptionRow(label: String, subLabel: String, selected: Boolean, o
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 label,
-                color = if (selected) CyanNeon else Color.White,
+                color = if (selected) CyanNeon else TextPrimary,
                 fontSize = 12.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1
@@ -862,7 +863,7 @@ fun CleanChatBubble(message: ChatMessage, onSpeak: () -> Unit) {
 
                 Text(
                     text = message.text,
-                    color = Color.White,
+                    color = TextPrimary,
                     fontSize = 13.sp,
                     lineHeight = 19.sp
                 )
@@ -901,7 +902,7 @@ fun CleanChatBubble(message: ChatMessage, onSpeak: () -> Unit) {
                             ) {
                                 Column(modifier = Modifier.padding(8.dp)) {
                                     Text("Cita Textual:", color = CyanNeon, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    Text("« ${cit.chunk.exactQuote} »", color = Color.White, fontSize = 11.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                                    Text("« ${cit.chunk.exactQuote} »", color = TextPrimary, fontSize = 11.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
                                 }
                             }
                         }

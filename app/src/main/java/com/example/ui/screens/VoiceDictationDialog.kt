@@ -72,6 +72,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.example.data.speech.SpeechContextPolisher
+import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.Slate400
@@ -417,7 +418,7 @@ fun VoiceDictationDialog(
                             color = when {
                                 isListening -> CyanNeon
                                 wantsListening -> AmberWarning
-                                else -> Color.White
+                                else -> TextPrimary
                             },
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
@@ -541,7 +542,7 @@ fun VoiceDictationDialog(
                                 BasicTextField(
                                     value = editText,
                                     onValueChange = { editText = it },
-                                    textStyle = TextStyle(color = Color.White, fontSize = 15.sp, lineHeight = 22.sp),
+                                    textStyle = TextStyle(color = TextPrimary, fontSize = 15.sp, lineHeight = 22.sp),
                                     cursorBrush = SolidColor(CyanNeon),
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -560,7 +561,7 @@ fun VoiceDictationDialog(
                                     if (finalizedText.isNotBlank()) {
                                         Text(
                                             text = finalizedText,
-                                            color = Color.White,
+                                            color = TextPrimary,
                                             fontSize = 15.sp,
                                             lineHeight = 22.sp
                                         )
@@ -640,7 +641,7 @@ fun VoiceDictationDialog(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 if (wantsListening) "Pausar micrófono" else "Reanudar",
-                                color = Color.White,
+                                color = TextPrimary,
                                 fontSize = 12.sp
                             )
                         }

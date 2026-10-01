@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.rotator.ModelCandidate
 import com.example.ui.MainViewModel
+import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
@@ -105,7 +106,7 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(20.dp))
-                        Text("Rotador de Modelos Gratuitos", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("Rotador de Modelos Gratuitos", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -130,7 +131,7 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
                         ) {
                             Column {
                                 Text("Catálogo Total", color = Slate400, fontSize = 10.sp)
-                                Text("${status.totalCandidates}", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("${status.totalCandidates}", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                         Box(
@@ -195,13 +196,17 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
                 border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate800))
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Estrategia de Proveedores Oficial vs Fallback", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("Estrategia de Proveedores Oficial vs Fallback", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
                     Text("Proveedor Principal (Oficial):", color = Slate400, fontSize = 11.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("OPENROUTER", "NVIDIA").forEach { p ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("OPENROUTER", "NVIDIA", "GROQ").forEach { p ->
                             FilterChip(
-                                label = if (p == "OPENROUTER") "OpenRouter Free" else "NVIDIA NIM",
+                                label = when (p) {
+                                    "OPENROUTER" -> "OpenRouter Free"
+                                    "NVIDIA" -> "NVIDIA NIM"
+                                    else -> "Groq"
+                                },
                                 isSelected = primaryProvider == p,
                                 onClick = {
                                     primaryProvider = p
@@ -212,10 +217,14 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
                     }
 
                     Text("Proveedor Secundario (Fallback):", color = Slate400, fontSize = 11.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("NVIDIA", "OPENROUTER").forEach { p ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("GROQ", "NVIDIA", "OPENROUTER").forEach { p ->
                             FilterChip(
-                                label = if (p == "NVIDIA") "NVIDIA NIM" else "OpenRouter Free",
+                                label = when (p) {
+                                    "NVIDIA" -> "NVIDIA NIM"
+                                    "OPENROUTER" -> "OpenRouter Free"
+                                    else -> "Groq"
+                                },
                                 isSelected = fallbackProvider == p,
                                 onClick = {
                                     fallbackProvider = p
@@ -223,6 +232,55 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
                                 }
                             )
                         }
+                    }
+
+                    // API key de Groq (enmascarada como las demás)
+                    var editingGroqKey by remember { mutableStateOf(viewModel.rotator.config.groqApiKey.isBlank()) }
+                    var groqKeyInput by remember { mutableStateOf("") }
+
+                    if (!editingGroqKey) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Slate800)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Groq: ••••••••" + viewModel.rotator.config.groqApiKey.takeLast(4),
+                                color = EmeraldSuccess,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            TextButton(onClick = { editingGroqKey = true; groqKeyInput = "" }) {
+                                Text("Cambiar", color = CyanNeon, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = groqKeyInput,
+                            onValueChange = {
+                                groqKeyInput = it
+                                if (it.isNotBlank()) viewModel.rotator.updateConfig(groqKey = it.trim())
+                            },
+                            label = { Text("Groq API Key (gsk_...)", color = Slate400, fontSize = 12.sp) },
+                            placeholder = { Text("Pega tu nueva clave aquí (console.groq.com)", color = Slate700, fontSize = 12.sp) },
+                            visualTransformation = PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { editingGroqKey = false }) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = "Listo", tint = EmeraldSuccess, modifier = Modifier.size(18.dp))
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedBorderColor = CyanNeon,
+                                unfocusedBorderColor = Slate700
+                            )
+                        )
                     }
 
                     // API keys enmascaradas: nunca quedan visibles una vez guardadas
@@ -266,8 +324,8 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
                             },
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
                                 focusedBorderColor = CyanNeon,
                                 unfocusedBorderColor = Slate700
                             )
@@ -315,8 +373,8 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
                             },
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
                                 focusedBorderColor = CyanNeon,
                                 unfocusedBorderColor = Slate700
                             )
@@ -334,7 +392,7 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Habilitar Localhost (Ollama en celular/PC)", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            Text("Habilitar Localhost (Ollama en celular/PC)", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                             Text("Solo actívalo si tienes un servidor LLM local corriendo", color = Slate400, fontSize = 10.sp)
                         }
                         Switch(
@@ -360,8 +418,8 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
                             label = { Text("URL Localhost (ej: http://localhost:11434/v1)", color = Slate400) },
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
                                 focusedBorderColor = CyanNeon,
                                 unfocusedBorderColor = Slate700
                             )
@@ -380,7 +438,7 @@ fun RotatorStatusScreen(viewModel: MainViewModel) {
             ) {
                 Text(
                     text = "Catálogo de Modelos Activos (${status.candidates.size})",
-                    color = Color.White,
+                    color = TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -435,7 +493,7 @@ fun CleanCandidateCard(candidate: ModelCandidate) {
                     }
                     Text(
                         text = candidate.modelId.substringAfter("/"),
-                        color = Color.White,
+                        color = TextPrimary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -443,8 +501,13 @@ fun CleanCandidateCard(candidate: ModelCandidate) {
 
                 Spacer(modifier = Modifier.height(3.dp))
 
+                val tierLabel = when (com.example.data.rotator.ModelQuality.tierOf(candidate.modelId)) {
+                    com.example.data.rotator.ModelQuality.TIER_STRONG -> "⚡ Calidad Alta"
+                    com.example.data.rotator.ModelQuality.TIER_WEAK -> "Débil"
+                    else -> "Calidad Media"
+                }
                 Text(
-                    text = "Score: ${candidate.effectiveScore().toInt()} | Contexto: ${candidate.contextLength / 1000}k",
+                    text = "$tierLabel | Score: ${candidate.effectiveScore().toInt()} | Contexto: ${candidate.contextLength / 1000}k",
                     color = Slate400,
                     fontSize = 10.sp
                 )

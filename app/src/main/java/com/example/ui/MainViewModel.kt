@@ -250,6 +250,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Tema claro/oscuro (oscuro por defecto)
+    private val _isDarkTheme = MutableStateFlow(prefs.isDarkTheme())
+    val isDarkTheme: StateFlow<Boolean> = _isDarkTheme.asStateFlow()
+
+    fun toggleTheme() {
+        val newDark = !_isDarkTheme.value
+        prefs.setDarkTheme(newDark)
+        _isDarkTheme.value = newDark
+    }
+
     // Banner informativo del asistente: solo la primera vez; se puede reabrir con el botón ?
     private val _assistantBannerSeen = MutableStateFlow(prefs.isAssistantBannerSeen())
     val assistantBannerSeen: StateFlow<Boolean> = _assistantBannerSeen.asStateFlow()
@@ -630,16 +640,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Texto natural de fecha -> timestamp SIEMPRE futuro; 0 cuando no hay fecha válida.
-     *  horaText "HH:mm" opcional: si viene, se fija esa hora; si no, se usa 09:00 por defecto. */
+     *  Acepta la hora embebida ("mañana a las 11:00") o separada en horaText; sin hora -> 9:00. */
     private fun resolveDateTextToTimestamp(fechaText: String?, horaText: String? = null): Long {
         if (fechaText.isNullOrBlank()) return 0L
         val clean = fechaText.trim().lowercase(Locale.getDefault())
         if (clean == "-" || clean == "sin fecha" || clean == "sin especificar" || clean == "n/a") return 0L
         val resolved = SpanishDateParser.resolveDueTimestamp(clean) ?: return 0L
         val cal = java.util.Calendar.getInstance().apply { timeInMillis = resolved }
-        val m = Regex("(\\d{1,2}):(\\d{2})").find(horaText.orEmpty())
+        val combined = "$clean ${horaText.orEmpty()}"
+        val m = Regex("(\\d{1,2}):(\\d{2})|a\\s+las\\s+(\\d{1,2})\\b").find(combined)
         return if (m != null) {
-            val h = m.groupValues[1].toIntOrNull()?.coerceIn(0, 23) ?: 9
+            val h = (m.groupValues[1].ifBlank { m.groupValues[3] }).toIntOrNull()?.coerceIn(0, 23) ?: 9
             val min = m.groupValues[2].toIntOrNull()?.coerceIn(0, 59) ?: 0
             cal.set(java.util.Calendar.HOUR_OF_DAY, h)
             cal.set(java.util.Calendar.MINUTE, min)
@@ -655,7 +666,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun hasExplicitHour(horaText: String?): Boolean =
-        Regex("(\\d{1,2}):(\\d{2})").containsMatchIn(horaText.orEmpty())
+        Regex("(\\d{1,2}):(\\d{2})|a\\s+las\\s+\\d{1,2}\\b").containsMatchIn(horaText.orEmpty())
 
     /** Fallback sin LLM: extracción ingenua pero con tipo, confianza MEDIA y sin fecha si no se dijo. */
     private fun naiveTaskExtraction(inputText: String, activeProject: String): ExtractedTaskDetails {
@@ -1205,6 +1216,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                   ---ACTION:RESCHEDULE_TASK|titulo|fechaTexto---
                 - Para concluir tarea: ---ACTION:COMPLETE_TASK|titulo---
                 - Para borrar tarea: ---ACTION:DELETE_TASK|titulo---
+                  * REGLA ABSOLUTA: NUNCA emitas DELETE_TASK salvo que el usuario diga EXPLÍCITAMENTE "borra/elimina/quita" esa tarea. Una corrección, cambio de hora, queja o re-agenda JAMÁS se resuelve borrando.
+                - Para re-agendar/cambiar fecha de tarea (incluye cuando el usuario corrige una fecha mal agendada):
+                  ---ACTION:RESCHEDULE_TASK|titulo|fechaTexto---
+                  * Si el usuario pide cambiar la HORA de varias tareas ("pon esas dos a las 11:00"), emite una línea RESCHEDULE_TASK por cada tarea afectada, manteniendo su fecha y cambiando la hora en fechaTexto (ej: "mañana a las 11:00").
                 - Para guardar directiva/especificación/reporte/nota en Memoria:
                   ---ACTION:SAVE_NOTE|titulo|contenido|categoria---
                   * categoria: DIRECTIVA (regla/convención), ESPECIFICACION (requisito técnico), REPORTE (informe) o MEMORIA (apunte general).
@@ -1435,11 +1450,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // 0. Preguntas, quejas y seguimientos NUNCA se ejecutan como comandos: van al LLM con historial
         if (isInterrogativeOrFollowUp(inputText)) return null
 
+        // 0.1 Los comandos destructivos (concluir/borrar/re-agendar) SOLO con verbo imperativo
+        // al inicio de la frase: evita que "eso no fue lo que te pedí... no te dije que la eliminaras"
+        // se interprete como orden de borrar.
+        val startsWithImperative = Regex(
+            "^(?:por\\s+favor\\s+)?(?:ya\\s+te\\s+)?(?:conclu\\w*|termina\\w*|finaliza\\w*|completa\\w*|borra\\w*|elimina\\w*|quita\\w*|descarta\\w*|reagenda\\w*|reprograma\\w*|mueve|cambia|marca|pon\\b|ya\\s+quedo|listo[,\\s])"
+        ).containsMatchIn(lower)
+
         // 1. Concluir / Terminar / Finalizar Tarea
         val isCompleteIntent = (lower.contains("conclu") || lower.contains("termina") || lower.contains("finaliz") || lower.contains("complet") || lower.contains("hecho")) &&
             (lower.contains("tarea") || lower.contains("esta") || lower.contains("este") || lower.contains("pon como") || lower.contains("marca como"))
 
-        if (isCompleteIntent && activeProject != "Todos") {
+        if (isCompleteIntent && startsWithImperative && activeProject != "Todos") {
             val projectTasks = db.taskDao().getTasksByJobSync(activeProject)
             if (projectTasks.isEmpty()) {
                 return "No tienes tareas registradas actualmente en el proyecto **$activeProject** para marcar como concluida."
@@ -1471,7 +1493,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val isDeleteIntent = (lower.contains("borra") || lower.contains("elimina") || lower.contains("quitar") || lower.contains("descartar")) &&
             (lower.contains("tarea") || lower.contains("esta") || lower.contains("este"))
 
-        if (isDeleteIntent && activeProject != "Todos") {
+        if (isDeleteIntent && startsWithImperative && activeProject != "Todos") {
             val projectTasks = db.taskDao().getTasksByJobSync(activeProject)
             if (projectTasks.isEmpty()) {
                 return "No tienes tareas registradas actualmente en el proyecto **$activeProject** para eliminar."
@@ -1508,7 +1530,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lower.contains("deberia ser") || lower.contains("debería ser") || lower.contains("es para el") ||
             lower.contains("es para la") || lower.contains("es para este") || lower.contains("es para ma"))
         val parsedDue = SpanishDateParser.resolveDueTimestamp(lower)
-        if (isRescheduleIntent && parsedDue != null && activeProject != "Todos") {
+        if (isRescheduleIntent && parsedDue != null && startsWithImperative && activeProject != "Todos") {
             val projectTasks = db.taskDao().getTasksByJobSync(activeProject)
             val target = projectTasks.firstOrNull { t -> t.title.lowercase(Locale.getDefault()).isNotBlank() && lower.contains(t.title.lowercase(Locale.getDefault()).take(18)) }
                 ?: projectTasks.filter { !it.isCompleted }.maxByOrNull { it.createdAt }
@@ -1756,6 +1778,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateRotatorSettings(
         openRouterKey: String? = null,
         nvidiaKey: String? = null,
+        groqKey: String? = null,
         localhostEnabled: Boolean? = null,
         localhostUrl: String? = null,
         localhostModel: String? = null,
@@ -1766,6 +1789,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         rotator.updateConfig(
             openRouterKey = openRouterKey,
             nvidiaKey = nvidiaKey,
+            groqKey = groqKey,
             localhostEnabled = localhostEnabled,
             localhostUrl = localhostUrl,
             localhostModelId = localhostModel,
@@ -1861,6 +1885,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .put("enabled", cfg.enabled)
                 .put("openRouterApiKey", cfg.openRouterApiKey)
                 .put("nvidiaApiKey", cfg.nvidiaApiKey)
+                .put("groqApiKey", cfg.groqApiKey)
                 .put("localhostEnabled", cfg.localhostEnabled)
                 .put("localhostUrl", cfg.localhostUrl)
                 .put("localhostModelId", cfg.localhostModelId)

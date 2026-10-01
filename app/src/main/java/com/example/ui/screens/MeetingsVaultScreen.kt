@@ -80,6 +80,7 @@ import com.example.data.model.VaultEntry
 import com.example.data.speech.SpeechContextPolisher
 import com.example.service.FloatingMeetingService
 import com.example.ui.MainViewModel
+import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
@@ -189,7 +190,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Icon(Icons.Default.Layers, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(20.dp))
-                                    Text("Captura Flotante en Segundo Plano", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("Captura Flotante en Segundo Plano", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
 
@@ -251,7 +252,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Icon(Icons.Default.Mic, contentDescription = null, tint = CyanNeon)
-                                Text("Captura Rápida de Voz y Juntas", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                Text("Captura Rápida de Voz y Juntas", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                             }
 
                             Spacer(modifier = Modifier.height(10.dp))
@@ -294,8 +295,8 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                 },
                                 modifier = Modifier.fillMaxWidth().height(140.dp).testTag("transcript_input"),
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
                                     focusedBorderColor = CyanNeon,
                                     unfocusedBorderColor = Slate700
                                 )
@@ -320,7 +321,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                     },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = if (isLiveRecordingActive) RoseError else Slate800,
-                                        contentColor = if (isLiveRecordingActive) Color.White else CyanNeon
+                                        contentColor = if (isLiveRecordingActive) TextPrimary else CyanNeon
                                     ),
                                     modifier = Modifier.weight(1f).testTag("voice_record_btn")
                                 ) {
@@ -515,7 +516,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                             Icon(Icons.Default.Shield, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(18.dp))
                                         }
                                         Column {
-                                            Text("Bóveda Inmutable de Cero Pérdida", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                            Text("Bóveda Inmutable de Cero Pérdida", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                             Text("Retención garantizada de 10 días", color = EmeraldSuccess, fontSize = 11.sp)
                                         }
                                     }
@@ -552,7 +553,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                         item {
                             Text(
                                 text = "Registros Crudos Protegidos (${vaultEntries.size})",
-                                color = Color.White,
+                                color = TextPrimary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -603,7 +604,7 @@ private fun EditMeetingDialog(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.Default.Edit, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp))
-                Text("Editar Junta", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text("Editar Junta", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             }
         },
         text = {
@@ -613,8 +614,8 @@ private fun EditMeetingDialog(
                     onValueChange = { title = it },
                     label = { Text("Título de la junta", color = Slate400) },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                         focusedBorderColor = CyanNeon,
                         unfocusedBorderColor = Slate700
                     ),
@@ -693,7 +694,7 @@ fun MeetingCard(meeting: MeetingNote, onToggleConcluded: (() -> Unit)? = null, o
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(meeting.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(meeting.title, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Spacer(modifier = Modifier.width(8.dp))
                 if (onEdit != null) {
                     IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
@@ -743,7 +744,7 @@ fun MeetingCard(meeting: MeetingNote, onToggleConcluded: (() -> Unit)? = null, o
                             Column {
                                 Text("Mis Acciones Asignadas:", color = CyanNeon, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.height(3.dp))
-                                Text(meeting.myActionItems, color = Color.White, fontSize = 12.sp)
+                                Text(meeting.myActionItems, color = TextPrimary, fontSize = 12.sp)
                             }
                         }
                     }
@@ -759,7 +760,7 @@ fun MeetingCard(meeting: MeetingNote, onToggleConcluded: (() -> Unit)? = null, o
                             Column {
                                 Text("Acciones de Otros:", color = VioletAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.height(3.dp))
-                                Text(meeting.othersActionItems, color = Color.White, fontSize = 12.sp)
+                                Text(meeting.othersActionItems, color = TextPrimary, fontSize = 12.sp)
                             }
                         }
                     }
@@ -845,7 +846,7 @@ fun VaultEntryCard(entry: VaultEntry) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(Icons.Default.Lock, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(14.dp))
-                    Text(entry.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(entry.title, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
                 Box(
                     modifier = Modifier

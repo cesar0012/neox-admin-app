@@ -61,4 +61,11 @@ class AppPreferences(context: Context) {
     fun setAssistantBannerSeen(seen: Boolean) {
         prefs.edit().putBoolean("assistant_banner_seen", seen).apply()
     }
+
+    // --- Tema claro/oscuro (oscuro por defecto) ---
+    fun isDarkTheme(): Boolean = prefs.getBoolean("dark_theme", true)
+
+    fun setDarkTheme(dark: Boolean) {
+        prefs.edit().putBoolean("dark_theme", dark).apply()
+    }
 }

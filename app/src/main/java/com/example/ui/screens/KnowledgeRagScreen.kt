@@ -62,6 +62,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.DocumentItem
 import com.example.data.rag.RAGQueryResult
 import com.example.ui.MainViewModel
+import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.RoseError
@@ -124,7 +125,7 @@ fun KnowledgeRagScreen(viewModel: MainViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(Icons.Default.Memory, contentDescription = null, tint = CyanNeon)
-                            Text("Memoria del Asistente", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Memoria del Asistente", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -151,8 +152,8 @@ fun KnowledgeRagScreen(viewModel: MainViewModel) {
                     modifier = Modifier.fillMaxWidth().testTag("rag_search_field"),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                         focusedBorderColor = CyanNeon,
                         unfocusedBorderColor = Slate700,
                         focusedContainerColor = Slate900,
@@ -193,7 +194,7 @@ fun KnowledgeRagScreen(viewModel: MainViewModel) {
                     ) {
                         Text(
                             text = "Directivas y Delineamientos (${filteredDocuments.size})",
-                            color = Color.White,
+                            color = TextPrimary,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -323,7 +324,7 @@ fun KnowledgeRagScreen(viewModel: MainViewModel) {
         AlertDialog(
             onDismissRequest = { docToDelete = null },
             containerColor = Slate900,
-            title = { Text("Eliminar Directiva", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+            title = { Text("Eliminar Directiva", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
             text = {
                 Text(
                     "¿Deseas eliminar '${docToDelete!!.title}' de la memoria? Esto también borrará los fragmentos indexados en el asistente.",
@@ -337,7 +338,7 @@ fun KnowledgeRagScreen(viewModel: MainViewModel) {
                         viewModel.deleteDocument(docToDelete!!)
                         docToDelete = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseError, contentColor = Color.White)
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseError, contentColor = TextPrimary)
                 ) {
                     Text("Eliminar", fontWeight = FontWeight.Bold)
                 }
@@ -374,7 +375,7 @@ fun RagChunkCard(result: RAGQueryResult) {
                     ) {
                         Text(result.chunk.sourceType, color = CyanNeon, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text(result.chunk.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(result.chunk.title, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Text("Score: ${String.format(Locale.ROOT, "%.2f", result.score)}", color = EmeraldSuccess, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
@@ -436,7 +437,7 @@ fun DocumentCard(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            Text(doc.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(doc.title, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
 
             Spacer(modifier = Modifier.height(4.dp))
 
@@ -468,7 +469,7 @@ fun AddOrEditDocumentDialog(
         title = {
             Text(
                 if (isEditing) "Editar Directiva / Documento" else "Adjuntar Documento / Delineamiento",
-                color = Color.White,
+                color = TextPrimary,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -482,8 +483,8 @@ fun AddOrEditDocumentDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                         focusedBorderColor = CyanNeon,
                         unfocusedBorderColor = Slate700
                     )
@@ -510,8 +511,8 @@ fun AddOrEditDocumentDialog(
                     label = { Text("Contenido o directivas de trabajo", color = Slate400) },
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                         focusedBorderColor = CyanNeon,
                         unfocusedBorderColor = Slate700
                     )

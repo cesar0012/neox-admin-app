@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.MainViewModel
+import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.RoseError
@@ -95,7 +96,7 @@ fun DesktopBridgeScreen(viewModel: MainViewModel) {
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Default.Lan, contentDescription = null, tint = if (isRunning) EmeraldSuccess else Slate400)
-                            Text("Servidor Webhook Wi-Fi", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text("Servidor Webhook Wi-Fi", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         }
                         Box(
                             modifier = Modifier
@@ -180,7 +181,7 @@ fun DesktopBridgeScreen(viewModel: MainViewModel) {
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Default.Code, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp))
-                            Text("Comando para Cloud Code / Terminal", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("Comando para Cloud Code / Terminal", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -245,7 +246,7 @@ fun DesktopBridgeScreen(viewModel: MainViewModel) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Default.Laptop, contentDescription = null, tint = CyanNeon)
-                        Text("Exportadores para PC y Editores", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("Exportadores para PC y Editores", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Text(
@@ -258,7 +259,7 @@ fun DesktopBridgeScreen(viewModel: MainViewModel) {
                     // Button 1: Markdown instructions file
                     Button(
                         onClick = { viewModel.exportIdeIntegrationDoc(context) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Slate800, contentColor = Color.White),
+                        colors = ButtonDefaults.buttonColors(containerColor = Slate800, contentColor = TextPrimary),
                         modifier = Modifier.fillMaxWidth().testTag("export_md_doc_btn")
                     ) {
                         Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp), tint = CyanNeon)
@@ -284,7 +285,7 @@ fun DesktopBridgeScreen(viewModel: MainViewModel) {
         item {
             Text(
                 text = "Registros de Sincronización en Vivo (${logs.size})",
-                color = Color.White,
+                color = TextPrimary,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
             )

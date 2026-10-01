@@ -41,6 +41,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.MainViewModel
+import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.RoseError
@@ -88,7 +89,7 @@ fun SecurityLockScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Text("Bóveda Protegida", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("Bóveda Protegida", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(6.dp))
                 Text("Ingresa tu PIN de seguridad para acceder a tus juntas, notas y proyectos.", color = Slate400, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
 
@@ -107,8 +108,8 @@ fun SecurityLockScreen(
                     placeholder = { Text("PIN de 4 dígitos", color = Slate400) },
                     modifier = Modifier.fillMaxWidth().testTag("pin_input_field"),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                         focusedBorderColor = CyanNeon,
                         unfocusedBorderColor = Slate700
                     )
@@ -151,7 +152,7 @@ fun SecuritySettingsDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Slate900,
-        title = { Text("Configuración de Seguridad y Bóveda", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold) },
+        title = { Text("Configuración de Seguridad y Bóveda", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("PIN de Bloqueo de la App:", color = Slate400, fontSize = 12.sp)
@@ -162,8 +163,8 @@ fun SecuritySettingsDialog(
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
                         focusedBorderColor = CyanNeon,
                         unfocusedBorderColor = Slate700
                     )

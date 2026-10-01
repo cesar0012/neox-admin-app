@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.MainActivity
 import com.example.OmniWorkApp
+import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.RoseError
@@ -167,7 +168,7 @@ fun CrashReportContent(
             Column {
                 Text(
                     "OmniWork — Informe de Cierre",
-                    color = Color.White,
+                    color = TextPrimary,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -194,7 +195,7 @@ fun CrashReportContent(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         deviceInfo,
-                        color = Color.White,
+                        color = TextPrimary,
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace
                     )
@@ -216,7 +217,7 @@ fun CrashReportContent(
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     errorMessage,
-                    color = Color.White,
+                    color = TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -274,7 +275,7 @@ fun CrashReportContent(
                 onClick = onRestart,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Slate800,
-                    contentColor = Color.White
+                    contentColor = TextPrimary
                 ),
                 modifier = Modifier.weight(1f)
             ) {

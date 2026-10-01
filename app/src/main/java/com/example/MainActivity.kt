@@ -3,13 +3,17 @@ package com.example
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,9 +38,11 @@ import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Laptop
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
@@ -44,7 +50,6 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -57,9 +62,11 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,10 +77,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.R
 import com.example.ui.MainViewModel
 import com.example.ui.screens.AgendaScreen
 import com.example.ui.screens.ChatAssistantScreen
@@ -84,6 +93,8 @@ import com.example.ui.screens.RotatorStatusScreen
 import com.example.ui.screens.SecurityLockScreen
 import com.example.ui.screens.SecuritySettingsDialog
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.RoseError
@@ -92,6 +103,7 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
+import com.example.ui.theme.VioletAccent
 
 enum class NavigationTab(val label: String, val icon: ImageVector) {
     AGENDA("Agenda", Icons.Default.CalendarToday),
@@ -111,7 +123,18 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            MyApplicationTheme {
+            val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
+            MyApplicationTheme(darkTheme = isDarkTheme) {
+                // Iconos de las barras del sistema con contraste según el tema:
+                // blancos en modo oscuro, oscuros en modo claro (antes se perdían en negro)
+                SideEffect {
+                    val barStyle = if (isDarkTheme) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                    }
+                    enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+                }
                 val isUnlocked by viewModel.isUnlocked.collectAsStateWithLifecycle()
                 var currentTab by remember { mutableStateOf(NavigationTab.AGENDA) }
                 var showSecurityDialog by remember { mutableStateOf(false) }
@@ -165,48 +188,64 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         containerColor = MaterialTheme.colorScheme.background,
                         topBar = {
-                            CenterAlignedTopAppBar(
+                            TopAppBar(
                                 title = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(28.dp)
+                                                .size(38.dp)
                                                 .clip(CircleShape)
-                                                .background(CyanNeon.copy(alpha = 0.2f)),
+                                                .background(Slate800)
+                                                .border(1.dp, Slate700, CircleShape),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Icon(
-                                                Icons.Default.Mic,
-                                                contentDescription = null,
-                                                tint = CyanNeon,
-                                                modifier = Modifier.size(16.dp)
+                                            Image(
+                                                painter = painterResource(R.drawable.ic_launcher_foreground),
+                                                contentDescription = "Neox Admin",
+                                                modifier = Modifier.size(36.dp)
                                             )
                                         }
-                                        Spacer(modifier = Modifier.width(8.dp))
                                         Text(
                                             "Neox Admin",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 18.sp,
-                                            color = Color.White
+                                            color = TextPrimary
                                         )
                                     }
                                 },
                                 actions = {
-                                    IconButton(
-                                        onClick = { showProjectsDialog = true },
-                                        modifier = Modifier.testTag("manage_projects_btn")
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.padding(end = 10.dp)
                                     ) {
-                                        Icon(Icons.Default.Tune, contentDescription = "Configurar Mis Proyectos", tint = Slate400)
-                                    }
-                                    IconButton(
-                                        onClick = { showSecurityDialog = true },
-                                        modifier = Modifier.testTag("security_settings_btn")
-                                    ) {
-                                        Icon(Icons.Default.Security, contentDescription = "Seguridad y Bóveda", tint = Slate400)
+                                        ModernTopBarButton(
+                                            icon = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                            description = if (isDarkTheme) "Cambiar a modo claro" else "Cambiar a modo oscuro",
+                                            tint = AmberWarning
+                                        ) { viewModel.toggleTheme() }
+                                        ModernTopBarButton(
+                                            icon = Icons.Default.Tune,
+                                            description = "Configurar Mis Proyectos",
+                                            tint = CyanNeon,
+                                            onClick = { showProjectsDialog = true }
+                                        )
+                                        ModernTopBarButton(
+                                            icon = Icons.Default.Security,
+                                            description = "Seguridad y Bóveda",
+                                            tint = VioletAccent,
+                                            onClick = { showSecurityDialog = true }
+                                        )
                                     }
                                 },
-                                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                                    containerColor = Slate900
+                                colors = TopAppBarDefaults.topAppBarColors(
+                                    containerColor = Slate900,
+                                    titleContentColor = TextPrimary,
+                                    navigationIconContentColor = TextPrimary,
+                                    actionIconContentColor = TextPrimary
                                 )
                             )
                         },
@@ -287,7 +326,7 @@ class MainActivity : ComponentActivity() {
                             onDismissRequest = { previousCrashLog = null },
                             containerColor = Slate900,
                             title = {
-                                Text("Aviso de Cierre Anterior", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("Aviso de Cierre Anterior", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             },
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -369,7 +408,7 @@ fun ProjectsManagementDialog(
                     Icon(Icons.Default.Folder, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp))
                 }
                 Column {
-                    Text("Mis Trabajos / Proyectos", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text("Mis Trabajos / Proyectos", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     Text("${jobs.size} registrados · etiquetan tareas, notas y chats", color = Slate400, fontSize = 10.sp)
                 }
             }
@@ -378,15 +417,15 @@ fun ProjectsManagementDialog(
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // Alta de proyecto
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Nuevo proyecto:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Nuevo proyecto:", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     OutlinedTextField(
                         value = newProjectName,
                         onValueChange = { newProjectName = it },
                         label = { Text("Nombre del trabajo *", color = Slate400, fontSize = 12.sp) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
                             focusedBorderColor = CyanNeon,
                             unfocusedBorderColor = Slate700
                         ),
@@ -398,8 +437,8 @@ fun ProjectsManagementDialog(
                         label = { Text("Empresa o cliente (opcional)", color = Slate400, fontSize = 12.sp) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
                             focusedBorderColor = CyanNeon,
                             unfocusedBorderColor = Slate700
                         ),
@@ -425,7 +464,7 @@ fun ProjectsManagementDialog(
                 }
 
                 // Listado
-                Text("Proyectos registrados:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("Proyectos registrados:", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().height(180.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -453,7 +492,7 @@ fun ProjectsManagementDialog(
                                 )
                                 Column {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(job.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(job.name, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                                         if (job.isPrimary) {
                                             Box(
                                                 modifier = Modifier
@@ -488,6 +527,27 @@ fun ProjectsManagementDialog(
             }
         }
     )
+}
+
+/** Botón circular moderno para la barra superior (toggle de tema, proyectos, seguridad). */
+@Composable
+private fun ModernTopBarButton(
+    icon: ImageVector,
+    description: String,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(tint.copy(alpha = 0.12f))
+            .border(1.dp, tint.copy(alpha = 0.45f), CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(17.dp))
+    }
 }
 
 private fun parseColorSafe(hex: String): Color = try {

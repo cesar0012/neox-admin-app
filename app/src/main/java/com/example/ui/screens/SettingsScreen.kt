@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.MainViewModel
+import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
@@ -165,7 +166,7 @@ private fun BackupSection(viewModel: MainViewModel) {
                         Icon(Icons.Default.Shield, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(18.dp))
                     }
                     Column {
-                        Text("Respaldo Completo", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("Respaldo Completo", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         Text("Un archivo .json con absolutamente todo", color = EmeraldSuccess, fontSize = 11.sp)
                     }
                 }

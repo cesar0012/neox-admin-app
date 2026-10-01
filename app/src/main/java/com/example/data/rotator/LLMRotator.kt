@@ -100,11 +100,12 @@ class LLMRotator private constructor(private val context: Context) {
             enabled = prefs.getBoolean("rotator_enabled", true),
             openRouterApiKey = prefs.getString("openrouter_api_key", "") ?: "",
             nvidiaApiKey = prefs.getString("nvidia_api_key", "") ?: "",
+            groqApiKey = prefs.getString("groq_api_key", "") ?: "",
             localhostEnabled = prefs.getBoolean("localhost_enabled", false),
             localhostUrl = prefs.getString("localhost_url", "http://localhost:11434/v1") ?: "http://localhost:11434/v1",
             localhostModelId = prefs.getString("localhost_model_id", "llama3:latest") ?: "llama3:latest",
             primaryProvider = prefs.getString("primary_provider", "OPENROUTER") ?: "OPENROUTER",
-            fallbackProvider = prefs.getString("fallback_provider", "NVIDIA") ?: "NVIDIA",
+            fallbackProvider = prefs.getString("fallback_provider", "GROQ") ?: "GROQ",
             activeProviderMode = prefs.getString("active_provider_mode", "ROTATOR") ?: "ROTATOR",
             defaultCooldownMinutes = prefs.getLong("default_cooldown_min", 30L),
             deadModelCooldownHours = prefs.getLong("dead_model_cooldown_hr", 24L)
@@ -114,6 +115,7 @@ class LLMRotator private constructor(private val context: Context) {
     fun updateConfig(
         openRouterKey: String? = null,
         nvidiaKey: String? = null,
+        groqKey: String? = null,
         localhostEnabled: Boolean? = null,
         localhostUrl: String? = null,
         localhostModelId: String? = null,
@@ -129,6 +131,10 @@ class LLMRotator private constructor(private val context: Context) {
         nvidiaKey?.let {
             config.nvidiaApiKey = it.trim()
             editor.putString("nvidia_api_key", config.nvidiaApiKey)
+        }
+        groqKey?.let {
+            config.groqApiKey = it.trim()
+            editor.putString("groq_api_key", config.groqApiKey)
         }
         localhostEnabled?.let {
             config.localhostEnabled = it
@@ -161,13 +167,12 @@ class LLMRotator private constructor(private val context: Context) {
     private fun initCuratedCatalog() {
         if (candidateList.isEmpty()) {
             val curated = listOf(
-                // OpenRouter free models
+                // OpenRouter free models (solo tiers fuertes/medios)
                 createCandidate("openrouter", "deepseek/deepseek-r1:free", 64000, setOf(ModelLane.GENERAL, ModelLane.REASONING, ModelLane.CODING), 100.0),
-                createCandidate("openrouter", "deepseek/deepseek-chat:free", 64000, setOf(ModelLane.GENERAL, ModelLane.CODING), 95.0),
+                createCandidate("openrouter", "deepseek/deepseek-chat-v3-0324:free", 64000, setOf(ModelLane.GENERAL, ModelLane.CODING), 95.0),
                 createCandidate("openrouter", "qwen/qwen-2.5-coder-32b-instruct:free", 32000, setOf(ModelLane.GENERAL, ModelLane.CODING), 92.0),
                 createCandidate("openrouter", "meta-llama/llama-3.3-70b-instruct:free", 128000, setOf(ModelLane.GENERAL, ModelLane.REASONING), 88.0),
-                createCandidate("openrouter", "google/gemini-2.0-flash-exp:free", 32000, setOf(ModelLane.GENERAL, ModelLane.VISION), 85.0),
-                createCandidate("openrouter", "mistralai/mistral-7b-instruct:free", 32000, setOf(ModelLane.GENERAL), 65.0),
+                createCandidate("openrouter", "google/gemma-3-27b-it:free", 96000, setOf(ModelLane.GENERAL), 80.0),
                 createCandidate("openrouter", "openrouter/free", 8192, setOf(ModelLane.GENERAL), 20.0),
 
                 // NVIDIA NIM frontier free models
@@ -176,7 +181,13 @@ class LLMRotator private constructor(private val context: Context) {
                 createCandidate("nvidia", "nvidia/llama-3.1-nemotron-70b-instruct", 128000, setOf(ModelLane.GENERAL, ModelLane.REASONING), 89.0),
                 createCandidate("nvidia", "qwen/qwen2.5-coder-32b-instruct", 32000, setOf(ModelLane.GENERAL, ModelLane.CODING), 88.0),
                 createCandidate("nvidia", "mistralai/mistral-large-2-instruct", 128000, setOf(ModelLane.GENERAL), 82.0),
-                createCandidate("nvidia", "google/gemma-2-27b-it", 8192, setOf(ModelLane.GENERAL), 75.0)
+
+                // Groq (se activan al poner la API key; muy rápidos y con capa gratuita generosa)
+                createCandidate("groq", "llama-3.3-70b-versatile", 128000, setOf(ModelLane.GENERAL, ModelLane.REASONING), 96.0),
+                createCandidate("groq", "openai/gpt-oss-120b", 128000, setOf(ModelLane.GENERAL, ModelLane.REASONING), 97.0),
+                createCandidate("groq", "openai/gpt-oss-20b", 128000, setOf(ModelLane.GENERAL, ModelLane.REASONING), 90.0),
+                createCandidate("groq", "qwen/qwen3-32b", 128000, setOf(ModelLane.GENERAL, ModelLane.CODING), 89.0),
+                createCandidate("groq", "moonshotai/kimi-k2-instruct", 128000, setOf(ModelLane.GENERAL), 88.0)
             )
             candidateList.addAll(curated)
         }
@@ -199,22 +210,27 @@ class LLMRotator private constructor(private val context: Context) {
                 )
             }
 
-            val eligible = candidateList.filter { candidate ->
+            val eligibleAll = candidateList.filter { candidate ->
                 if (exclude.contains(candidate.modelKey)) return@filter false
 
                 // If candidate is NVIDIA, only consider eligible if an API key is configured
                 if (candidate.provider == "nvidia" && config.nvidiaApiKey.isBlank()) {
                     return@filter false
                 }
+                if (candidate.provider == "groq" && config.groqApiKey.isBlank()) {
+                    return@filter false
+                }
 
                 when (config.activeProviderMode) {
                     "OPENROUTER_ONLY" -> candidate.provider == "openrouter"
                     "NVIDIA_ONLY" -> candidate.provider == "nvidia" && config.nvidiaApiKey.isNotBlank()
+                    "GROQ_ONLY" -> candidate.provider == "groq" && config.groqApiKey.isNotBlank()
                     "LOCALHOST" -> candidate.provider == "localhost" && config.localhostEnabled
                     else -> { // ROTATOR mode
                         when (candidate.provider) {
                             "openrouter" -> true
                             "nvidia" -> config.nvidiaApiKey.isNotBlank()
+                            "groq" -> config.groqApiKey.isNotBlank()
                             "localhost" -> config.localhostEnabled
                             else -> true
                         }
@@ -222,11 +238,18 @@ class LLMRotator private constructor(private val context: Context) {
                 }
             }
 
+            // FILTRO DE CALIDAD: mientras exista al menos un modelo aceptable (tier >= 1),
+            // los modelos débiles (mini/nano/<=9b) jamás participan en la rotación.
+            val eligible = eligibleAll
+                .filter { ModelQuality.tierOf(it.modelId) >= ModelQuality.TIER_MID }
+                .ifEmpty { eligibleAll }
+
             if (eligible.isEmpty()) return null
 
-            // Prioritize primary provider first, then fallback provider
+            // Prioritize primary provider first, then fallback provider; el score se
+            // multiplica por el factor de calidad del modelo (fuertes primero SIEMPRE)
             fun providerWeight(c: ModelCandidate): Double {
-                val base = c.effectiveScore()
+                val base = c.effectiveScore() * ModelQuality.factorOf(c.modelId)
                 val providerBonus = when (c.provider.uppercase()) {
                     config.primaryProvider.uppercase() -> 200.0
                     config.fallbackProvider.uppercase() -> 50.0
@@ -260,6 +283,7 @@ class LLMRotator private constructor(private val context: Context) {
     private fun toResolvedCandidate(candidate: ModelCandidate, fallback: Boolean): ResolvedCandidate {
         val (apiKey, apiBase) = when (candidate.provider) {
             "nvidia" -> Pair(config.nvidiaApiKey, "https://integrate.api.nvidia.com/v1")
+            "groq" -> Pair(config.groqApiKey, "https://api.groq.com/openai/v1")
             "localhost" -> Pair("", config.localhostUrl)
             else -> {
                 val key = config.openRouterApiKey
@@ -518,13 +542,49 @@ class LLMRotator private constructor(private val context: Context) {
                 }
             }
 
-            // 3. Fallback seeds if remote scrape returned empty
-            if (newlyDiscovered.isEmpty()) {
+            // 3. Discover Groq models if user configured an API key (tier gratuito, muy rápidos)
+            if (config.groqApiKey.isNotBlank()) {
+                try {
+                    val gqRequest = Request.Builder()
+                        .url("https://api.groq.com/openai/v1/models")
+                        .addHeader("Authorization", "Bearer ${config.groqApiKey}")
+                        .get()
+                        .build()
+
+                    val gqResp = httpClient.newCall(gqRequest).execute()
+                    gqResp.use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string().orEmpty()
+                            val root = JSONObject(body)
+                            val dataArray = root.optJSONArray("data") ?: JSONArray()
+                            for (i in 0 until dataArray.length()) {
+                                val modelObj = dataArray.optJSONObject(i) ?: continue
+                                val id = modelObj.optString("id", "")
+                                if (id.isNotBlank()) {
+                                    newlyDiscovered.add(
+                                        createCandidate("groq", id, 128000, deriveLanes(id), computeHeuristicScore(id, 128000))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(tag, "Failed discovering Groq catalog: ${e.message}")
+                }
+            }
+
+            // 4. Quality filter: fuera los modelos débiles del catálogo dinámico
+            //    (se conservan solo si el catálogo completo fuera débil)
+            val qualityFiltered = newlyDiscovered.filter { ModelQuality.tierOf(it.modelId) >= ModelQuality.TIER_MID }
+            val catalogToUse = if (qualityFiltered.size >= 4) qualityFiltered else newlyDiscovered
+
+            // 5. Fallback seeds if remote scrape returned empty
+            if (catalogToUse.isEmpty()) {
                 initCuratedCatalog()
             } else {
                 synchronized(candidateList) {
                     val existingMap = candidateList.associateBy { it.modelKey }
-                    for (c in newlyDiscovered) {
+                    for (c in catalogToUse) {
                         val prev = existingMap[c.modelKey]
                         if (prev != null) {
                             c.cooldownUntil = prev.cooldownUntil
@@ -536,8 +596,8 @@ class LLMRotator private constructor(private val context: Context) {
                     }
 
                     candidateList.clear()
-                    // Cap to 30 best ranked models
-                    candidateList.addAll(newlyDiscovered.sortedByDescending { it.effectiveScore() }.take(30))
+                    // Cap to 30 best ranked models (ya ponderado por calidad)
+                    candidateList.addAll(catalogToUse.sortedByDescending { it.effectiveScore() }.take(30))
 
                     // Only include localhost if explicitly enabled
                     if (config.localhostEnabled) {
@@ -599,7 +659,9 @@ class LLMRotator private constructor(private val context: Context) {
         }
         val contextBonus = min((contextLength / 20000.0), 30.0)
         val baseScore = familyBonus + contextBonus
-        return if (modelId == "openrouter/free") 20.0 else baseScore
+        // El factor de calidad multiplica: los modelos débiles quedan al fondo del catálogo
+        val withQuality = if (modelId == "openrouter/free") 20.0 else baseScore * ModelQuality.factorOf(modelId)
+        return withQuality
     }
 
     private fun createCandidate(
