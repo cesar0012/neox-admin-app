@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,8 +25,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -1980,7 +1984,7 @@ fun TaskCard(
 }
 
 @Composable
-fun FilterChip(label: String, isSelected: Boolean, onClick: () -> Unit) {
+fun FilterChip(label: String, isSelected: Boolean, onClick: () -> Unit, leadingIcon: ImageVector? = null) {
     val bg = if (isSelected) CyanNeon else Slate900
     val textColor = if (isSelected) Color(0xFF00363D) else Slate400
     val border = if (isSelected) CyanNeon else Slate700
@@ -1993,17 +1997,28 @@ fun FilterChip(label: String, isSelected: Boolean, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        Text(
-            text = label,
-            color = textColor,
-            fontSize = 11.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1,
-            softWrap = false
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (leadingIcon != null) {
+                Icon(
+                    leadingIcon,
+                    contentDescription = null,
+                    tint = if (isSelected) Color(0xFF00363D) else CyanNeon,
+                    modifier = Modifier.size(13.dp)
+                )
+            }
+            Text(
+                text = label,
+                color = textColor,
+                fontSize = 11.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddTaskDialog(
     jobList: List<String>,
@@ -2028,7 +2043,10 @@ fun AddTaskDialog(
             Text("Nueva Tarea / Indicación", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+            ) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
@@ -2057,13 +2075,17 @@ fun AddTaskDialog(
                 )
 
                 Text("Tipo de actividad:", color = Slate400, fontSize = 12.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     TaskTypes.ALL.forEach { type ->
                         val tv = typeVisualOf(type)
                         FilterChip(
                             label = tv.label,
                             isSelected = selectedType == type,
-                            onClick = { selectedType = type }
+                            onClick = { selectedType = type },
+                            leadingIcon = tv.icon
                         )
                     }
                 }
@@ -2088,7 +2110,10 @@ fun AddTaskDialog(
                 }
 
                 Text("Prioridad:", color = Slate400, fontSize = 12.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     listOf("ALTA", "MEDIA", "BAJA").forEach { prio ->
                         FilterChip(
                             label = prio,
@@ -2120,6 +2145,7 @@ fun AddTaskDialog(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EditTaskDialog(
     task: WorkTask,
@@ -2145,7 +2171,10 @@ fun EditTaskDialog(
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+            ) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
@@ -2174,18 +2203,25 @@ fun EditTaskDialog(
                 )
 
                 Text("Tipo de actividad:", color = Slate400, fontSize = 12.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     TaskTypes.ALL.forEach { type ->
                         FilterChip(
                             label = TaskTypes.labelOf(type),
                             isSelected = selectedType == type,
-                            onClick = { selectedType = type }
+                            onClick = { selectedType = type },
+                            leadingIcon = typeVisualOf(type).icon
                         )
                     }
                 }
 
                 Text("Prioridad:", color = Slate400, fontSize = 12.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     listOf("ALTA", "MEDIA", "BAJA").forEach { prio ->
                         FilterChip(
                             label = prio,
@@ -2250,10 +2286,10 @@ private fun utcDateToLocal(utcMillis: Long, preserveTimeFrom: Long?): Long {
 }
 
 /**
- * Editor de fecha y hora: chips rápidos + selección exacta con calendario y reloj,
- * con la opción de marcar "sin hora específica".
+ * Editor de fecha y hora: chips que FLUYEN en varias líneas (todo siempre visible y
+ * seleccionable), selección exacta con calendario y reloj, y "sin hora específica".
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun DueDateTimeEditor(
     dueTimestamp: Long,
@@ -2267,7 +2303,9 @@ private fun DueDateTimeEditor(
     val now = remember { System.currentTimeMillis() }
     val dateLabel = if (dueTimestamp <= 0L) "Sin fecha"
     else SimpleDateFormat("EEE d MMM yyyy", Locale("es", "ES")).format(Date(dueTimestamp))
-    val timeLabel = if (dueTimestamp <= 0L || !hasTime) "Sin hora"
+    val dateShort = if (dueTimestamp <= 0L) "Elegir fecha"
+    else SimpleDateFormat("EEE d MMM", Locale("es", "ES")).format(Date(dueTimestamp))
+    val timeLabel = if (dueTimestamp <= 0L || !hasTime) "Fijar hora"
     else SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(dueTimestamp))
 
     fun quickDue(days: Long): Long {
@@ -2280,20 +2318,35 @@ private fun DueDateTimeEditor(
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Fecha:", color = Slate400, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             FilterChip(label = "Hoy", isSelected = false, onClick = { onDueChange(quickDue(0)) })
             FilterChip(label = "Mañana", isSelected = false, onClick = { onDueChange(quickDue(1)) })
             FilterChip(label = "+7 días", isSelected = false, onClick = { onDueChange(quickDue(7)) })
             FilterChip(label = "Sin fecha", isSelected = dueTimestamp <= 0L, onClick = { onDueChange(0L) })
-            FilterChip(label = "📅 $dateLabel".replace("📅 ", ""), isSelected = dueTimestamp > 0L, onClick = { showDatePicker = true })
+            FilterChip(
+                label = dateShort,
+                isSelected = dueTimestamp > 0L,
+                onClick = { showDatePicker = true },
+                leadingIcon = Icons.Default.CalendarMonth
+            )
+        }
+        if (dueTimestamp > 0L) {
+            Text(dateLabel, color = CyanNeon, fontSize = 10.sp, fontWeight = FontWeight.Medium)
         }
 
         Text("Hora:", color = Slate400, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             FilterChip(
-                label = "⏰ $timeLabel".replace("⏰ ", ""),
+                label = timeLabel,
                 isSelected = hasTime && dueTimestamp > 0L,
-                onClick = { showTimePicker = true }
+                onClick = { showTimePicker = true },
+                leadingIcon = Icons.Default.Schedule
             )
             FilterChip(
                 label = "Sin hora específica",
