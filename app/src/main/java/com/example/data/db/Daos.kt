@@ -11,6 +11,7 @@ import com.example.data.model.ConversationSession
 import com.example.data.model.DocumentItem
 import com.example.data.model.JobProject
 import com.example.data.model.MeetingNote
+import com.example.data.model.MeetingTaskItem
 import com.example.data.model.MemoryChunk
 import com.example.data.model.ProcessingQueueItem
 import com.example.data.model.VaultEntry
@@ -96,6 +97,27 @@ interface MeetingDao {
 
     @Delete
     suspend fun deleteMeeting(meeting: MeetingNote)
+}
+
+@Dao
+interface MeetingTaskItemDao {
+    @Insert
+    suspend fun insertItems(items: List<MeetingTaskItem>)
+
+    @Update
+    suspend fun updateItem(item: MeetingTaskItem)
+
+    @Delete
+    suspend fun deleteItem(item: MeetingTaskItem)
+
+    @Query("SELECT * FROM meeting_task_items WHERE meetingId = :meetingId ORDER BY createdAt ASC")
+    fun getItemsForMeeting(meetingId: Long): Flow<List<MeetingTaskItem>>
+
+    @Query("SELECT * FROM meeting_task_items ORDER BY createdAt ASC")
+    fun getAllItems(): Flow<List<MeetingTaskItem>>
+
+    @Query("SELECT * FROM meeting_task_items ORDER BY createdAt ASC")
+    suspend fun getAllItemsSync(): List<MeetingTaskItem>
 }
 
 @Dao

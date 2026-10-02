@@ -13,6 +13,7 @@ import com.example.data.model.ConversationSession
 import com.example.data.model.DocumentItem
 import com.example.data.model.JobProject
 import com.example.data.model.MeetingNote
+import com.example.data.model.MeetingTaskItem
 import com.example.data.model.ProcessingQueueItem
 import com.example.data.model.TaskTypes
 import com.example.data.model.VaultEntry
@@ -94,6 +95,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val allMeetings = db.meetingDao().getAllMeetings().stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
+
+    /** Ítems detectados en juntas, para el pop-up de revisión de minutas. */
+    val allMeetingItems = db.meetingItemDao().getAllItems().stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    /** Se dispara con el id de la junta recién procesada: abre el pop-up de revisión de ítems. */
+    private val _meetingProcessedEvent = MutableStateFlow<Long?>(null)
+    val meetingProcessedEvent: StateFlow<Long?> = _meetingProcessedEvent
+    fun consumeMeetingProcessedEvent() { _meetingProcessedEvent.value = null }
 
     val allDocuments = db.documentDao().getAllDocuments().stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
@@ -1102,25 +1113,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     timestamp = timestamp
                 )
 
-                // If "mis acciones" contains tasks, automatically add them to tasks!
-                if (parsed.myActions.isNotBlank() && parsed.myActions != "Ninguna asignada") {
-                    parsed.myActions.lines().filter { it.isNotBlank() }.take(3).forEach { actionLine ->
-                        val cleanAction = actionLine.replace(Regex("^[-*•0-9.]+\\s*"), "").trim()
-                        if (cleanAction.isNotEmpty()) {
-                            db.taskDao().insertTask(
-                                WorkTask(
-                                    title = cleanAction,
-                                    jobTag = jobTag,
-                                    dueTimestamp = System.currentTimeMillis() + 86400 * 1000L,
-                                    priority = "ALTA",
-                                    taskType = TaskTypes.detect(cleanAction.lowercase(Locale.getDefault())),
-                                    confidence = ConfidenceLevels.MEDIA,
-                                    originReference = "Junta: ${parsed.title}"
-                                )
-                            )
-                        }
-                    }
+                // 3. Extracción agéntica de ítems con los MISMOS lineamientos del asistente
+                //    conversacional (fechas/horas precisas + red de seguridad sobre la cita).
+                //    Nada se agrega automáticamente: quedan PENDIENTES de revisión en el pop-up.
+                val detectedItems = try {
+                    extractMeetingItemsViaLLM(rawTranscript, jobTag, parsed.title)
+                } catch (t: Throwable) {
+                    android.util.Log.e("MainViewModel", "extractMeetingItems error: ${t.message}", t)
+                    emptyList()
                 }
+                if (detectedItems.isNotEmpty()) {
+                    db.meetingItemDao().insertItems(detectedItems.map { it.copy(meetingId = meetingId) })
+                }
+                _meetingProcessedEvent.value = meetingId
             } else {
                 // LLM failed or offline: queue for automatic retry, never lose information
                 db.queueDao().enqueueItem(
@@ -1195,6 +1200,197 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         return ParsedMeeting(title, summary, myActions, othersActions, decisions, quotesArray.toString())
+    }
+
+    /**
+     * Sub-agente extractor de compromisos de una junta, con los MISMOS lineamientos del
+     * asistente conversacional: títulos técnicos cortos, tipo de actividad, prioridad,
+     * confianza y fechas/horas en lenguaje natural. Cada ítem incluye la cita textual
+     * donde se mencionó, que sirve de red de seguridad para rescatar fechas/horas que el
+     * modelo haya reportado como ausentes.
+     */
+    private suspend fun extractMeetingItemsViaLLM(
+        transcript: String,
+        jobTag: String,
+        meetingTitle: String
+    ): List<MeetingTaskItem> {
+        if (transcript.isBlank()) return emptyList()
+        val systemPrompt = """
+            Eres un SUB-AGENTE EXTRACTOR de compromisos de la transcripción de una junta de trabajo.
+            Detecta TODOS los compromisos, pendientes, juntas futuras, llamadas y entregas que quedaron
+            ASIGNADOS AL PROPIETARIO de esta app (quien graba la junta y usualmente la conduce):
+            - Dichos en primera persona ("voy a...", "me encargo de...", "yo se lo mando...") o
+              asignados directamente a él por otro participante.
+            - NO incluyas compromisos de otros participantes: esos se registran aparte en la minuta.
+
+            POR CADA compromiso, aplica las reglas del asistente ejecutivo:
+            - TITULO: corto (máx 8 palabras), técnico y orientado a la acción. NUNCA frases literales
+              del orador. Junta → "Junta: ...", llamada → "Llamada: ...", deadline o envío → "Entrega: ...".
+            - TIPO: TAREA / JUNTA / LLAMADA / ENTREGA / RECORDATORIO.
+            - PRIORIDAD: ALTA / MEDIA / BAJA.
+            - FECHA: la fecha en lenguaje natural tal cual se entendió ("viernes", "mañana", "en 3 días",
+              "25/12/2026") o "sin fecha" si no se mencionó. NUNCA fechas pasadas.
+            - HORA (CRÍTICA): HH:mm en 24h convirtiendo cualquier formato ("10 de la mañana"→10:00,
+              "3 y media de la tarde"→15:30, "10 pm"→22:00) o "sin hora". La hora que se mencionó
+              SIEMPRE va en este campo, nunca únicamente en la cita.
+            - CONFIANZA: ALTA si quedó claro, MEDIA si ambiguo, BAJA si muy incierto.
+            - CITA: la frase textual de la junta donde se mencionó el compromiso, INCLUYENDO cualquier
+              fecha u hora dicha (respaldo para rescatar datos faltantes).
+
+            Responde SOLO bloques como el ejemplo, uno por compromiso, sin texto extra.
+            Si no detectas compromisos del propietario, responde únicamente: ---SIN_ITEMS---
+            ---ITEM---
+            TITULO: Junta: revisar templates HTML
+            TIPO: JUNTA
+            PRIORIDAD: ALTA
+            FECHA: mañana
+            HORA: 10:00
+            CONFIANZA: ALTA
+            CITA: Necesitamos agendar una junta para el día de mañana a las 10 de la mañana para revisar los templates.
+        """.trimIndent()
+
+        val userPrompt = "Junta: $meetingTitle ($jobTag)\n" +
+            "Fecha de la junta: ${SimpleDateFormat("EEEE d 'de' MMMM 'de' yyyy, HH:mm", Locale("es", "ES")).format(Date())}\n\n" +
+            "TRANSCRIPCIÓN:\n$transcript"
+
+        val result = rotator.executeWithRotation(
+            systemPrompt = systemPrompt,
+            userPrompt = userPrompt,
+            lane = ModelLane.REASONING,
+            maxTokens = 1800
+        )
+        if (!result.isSuccess) return emptyList()
+        val output = LLMRotator.cleanModelResponse(result.getOrNull().orEmpty())
+        if (output.uppercase(Locale.getDefault()).contains("SIN_ITEMS")) return emptyList()
+
+        fun field(block: String, vararg keys: String): String {
+            for (line in block.lines()) {
+                val t = line.trim()
+                for (k in keys) {
+                    if (t.startsWith(k, ignoreCase = true)) {
+                        return t.substring(k.length).replaceFirst(Regex("^\\s*[:\\-]\\s*"), "").trim()
+                    }
+                }
+            }
+            return ""
+        }
+
+        val items = mutableListOf<MeetingTaskItem>()
+        output.split("---ITEM---").drop(1).forEach { block ->
+            val title = field(block, "TITULO:", "TÍTULO:", "TITULO", "TÍTULO")
+                .replace(Regex("^[\"'\\[\\]]+|[\"'\\[\\]]+$"), "").trim()
+            if (title.isBlank() || title.length > 120) return@forEach
+
+            val tipoRaw = field(block, "TIPO:", "TIPO").uppercase(Locale.getDefault())
+            val prioRaw = field(block, "PRIORIDAD:", "PRIORIDAD").uppercase(Locale.getDefault())
+            val confRaw = field(block, "CONFIANZA:", "CONFIANZA").uppercase(Locale.getDefault())
+            val fechaRaw = field(block, "FECHA:", "FECHA")
+            val horaRaw = field(block, "HORA:", "HORA")
+            val cita = field(block, "CITA:", "CITA")
+
+            // Resolución con los mismos lineamientos del asistente + red de seguridad
+            // determinista sobre la cita textual (rescata fecha/hora si el modelo falló)
+            var due = resolveDateTextToTimestamp(fechaRaw, horaRaw)
+            var withTime = parseHourMinutes("$fechaRaw $horaRaw") != null
+            if (cita.isNotBlank()) {
+                val rec = reconcileWithRawText(
+                    ExtractedTaskDetails(
+                        title = title,
+                        description = cita,
+                        taskType = if (TaskTypes.isValid(tipoRaw)) tipoRaw else TaskTypes.TAREA,
+                        priority = if (prioRaw in listOf("ALTA", "MEDIA", "BAJA")) prioRaw else "MEDIA",
+                        dueTimestamp = due,
+                        confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.MEDIA,
+                        viaLLM = true,
+                        hasTime = withTime
+                    ),
+                    cita
+                )
+                due = rec.dueTimestamp
+                withTime = rec.hasTime
+            }
+
+            items.add(
+                MeetingTaskItem(
+                    meetingId = 0L, // se asigna al insertar
+                    title = title,
+                    contextQuote = cita,
+                    taskType = if (TaskTypes.isValid(tipoRaw)) tipoRaw else TaskTypes.detect(cita),
+                    priority = if (prioRaw in listOf("ALTA", "MEDIA", "BAJA")) prioRaw else "MEDIA",
+                    dueTimestamp = due,
+                    hasTime = withTime,
+                    confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.MEDIA,
+                    status = "PENDIENTE"
+                )
+            )
+        }
+        return items
+    }
+
+    /** Agrega un ítem revisado de la junta a las tareas del usuario (agenda + RAG + recordatorio). */
+    fun addMeetingItemToTasks(item: MeetingTaskItem) {
+        viewModelScope.launch {
+            val meeting = db.meetingDao().getMeetingById(item.meetingId)
+            val jobTag = meeting?.jobTag ?: "General"
+            val description = buildString {
+                append("Detectada en la junta")
+                meeting?.let { append(" \"").append(it.title).append("\"") }
+                if (item.contextQuote.isNotBlank()) {
+                    append(".\nContexto: ").append(item.contextQuote)
+                }
+            }
+            val taskId = db.taskDao().insertTask(
+                WorkTask(
+                    title = item.title,
+                    description = description,
+                    jobTag = jobTag,
+                    dueTimestamp = item.dueTimestamp,
+                    priority = item.priority,
+                    taskType = if (TaskTypes.isValid(item.taskType)) item.taskType else TaskTypes.TAREA,
+                    confidence = if (ConfidenceLevels.isValid(item.confidence)) item.confidence else ConfidenceLevels.MEDIA,
+                    hasTime = item.hasTime,
+                    originReference = "Junta: ${meeting?.title.orEmpty()}"
+                )
+            )
+            ragEngine.indexContent(
+                sourceId = taskId,
+                sourceType = "TASK",
+                title = item.title,
+                jobTag = jobTag,
+                content = "Tarea: ${item.title}. Tipo: ${TaskTypes.labelOf(item.taskType)}. Detectada en junta: ${meeting?.title.orEmpty()}."
+            )
+            if (item.dueTimestamp > System.currentTimeMillis()) {
+                ReminderNotificationHelper.showTaskReminder(
+                    getApplication(),
+                    taskId.toInt(),
+                    item.title,
+                    "Programada para ${formatDueForHumans(item.dueTimestamp)} (${item.priority})",
+                    jobTag,
+                    "Ítem de junta"
+                )
+            }
+            db.meetingItemDao().updateItem(item.copy(status = "AGREGADA"))
+        }
+    }
+
+    /** Elimina un ítem detectado que no aplica (descarte definitivo del pop-up). */
+    fun discardMeetingItem(item: MeetingTaskItem) {
+        viewModelScope.launch { db.meetingItemDao().deleteItem(item) }
+    }
+
+    /** Define/corrige la fecha de un ítem en lenguaje natural ("viernes a las 10 am"). */
+    fun updateMeetingItemSchedule(item: MeetingTaskItem, fechaText: String) {
+        viewModelScope.launch {
+            val lower = fechaText.trim().lowercase(Locale.getDefault())
+            val hm = parseHourMinutes(lower)
+            val base = SpanishDateParser.resolveDueTimestamp(stripHourExpressions(lower))
+            val due = when {
+                base != null -> applyHourToTimestamp(base, hm)
+                hm != null -> nextOccurrenceAtHour(hm)
+                else -> return@launch // texto sin fecha ni hora: no cambiar nada
+            }
+            db.meetingItemDao().updateItem(item.copy(dueTimestamp = due, hasTime = hm != null))
+        }
     }
 
     // --- Conversational RAG Assistant ---
@@ -2079,6 +2275,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             root.put("conversaciones", conversations)
+
+            // Ítems detectados en juntas (pendientes de revisión) — cero pérdida
+            val meetingItems = db.meetingItemDao().getAllItemsSync()
+            root.put("itemsJunta", JSONArray(meetingItems.map { mi ->
+                JSONObject()
+                    .put("meetingId", mi.meetingId).put("title", mi.title)
+                    .put("contextQuote", mi.contextQuote).put("taskType", mi.taskType)
+                    .put("priority", mi.priority).put("dueTimestamp", mi.dueTimestamp)
+                    .put("hasTime", mi.hasTime).put("confidence", mi.confidence)
+                    .put("status", mi.status).put("createdAt", mi.createdAt)
+            }))
 
             val cfg = rotator.config
             root.put("rotador", JSONObject()

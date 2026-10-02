@@ -49,6 +49,26 @@ data class MeetingNote(
     val isConcluded: Boolean = false
 )
 
+/**
+ * Ítem (tarea/junta/llamada/entrega/recordatorio) detectado en la transcripción de una
+ * junta. Queda PENDIENTE de revisión del usuario en el pop-up de la minuta: él define
+ * fechas faltantes, descarta lo que no aplique y agrega a sus tareas lo que sí quiera.
+ */
+@Entity(tableName = "meeting_task_items", indices = [Index("meetingId")])
+data class MeetingTaskItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val meetingId: Long,
+    val title: String,
+    val contextQuote: String = "",   // frase textual de la junta donde se mencionó
+    val taskType: String = "TAREA",  // TAREA / JUNTA / LLAMADA / ENTREGA / RECORDATORIO
+    val priority: String = "MEDIA",  // ALTA / MEDIA / BAJA
+    val dueTimestamp: Long = 0,      // 0 = sin fecha: el usuario debe definirla antes de agregar
+    val hasTime: Boolean = false,    // true si se detectó hora explícita
+    val confidence: String = "MEDIA",
+    val status: String = "PENDIENTE", // PENDIENTE / AGREGADA / DESCARTADA
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "documents")
 data class DocumentItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

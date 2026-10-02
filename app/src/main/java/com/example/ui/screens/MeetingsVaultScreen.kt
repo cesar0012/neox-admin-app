@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -48,11 +49,13 @@ import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -75,6 +78,7 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.VioletAccent
+import kotlinx.coroutines.flow.first
 import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -103,10 +107,27 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
     val vaultEntries by viewModel.allVaultEntries.collectAsStateWithLifecycle()
     val pendingQueue by viewModel.pendingQueue.collectAsStateWithLifecycle()
     val isProcessing by viewModel.isMeetingProcessing.collectAsStateWithLifecycle()
+    val meetingItems by viewModel.allMeetingItems.collectAsStateWithLifecycle()
+    val processedMeetingId by viewModel.meetingProcessedEvent.collectAsStateWithLifecycle()
 
     var liveTranscriptText by remember { mutableStateOf("") }
     var showMeetingDictation by remember { mutableStateOf(false) }
     var meetingToEdit by remember { mutableStateOf<MeetingNote?>(null) }
+    var openItemsMeeting by remember { mutableStateOf<MeetingNote?>(null) }
+
+    // Al terminar el procesamiento de una minuta, abre la revisión de ítems detectados
+    LaunchedEffect(processedMeetingId) {
+        val id = processedMeetingId ?: return@LaunchedEffect
+        val meeting = meetings.firstOrNull { it.id == id }
+        if (meeting != null) {
+            // Espera breve a que los ítems extraídos lleguen por el Flow antes de abrir
+            kotlinx.coroutines.withTimeoutOrNull(1500) {
+                snapshotFlow { meetingItems.any { it.meetingId == id } }.first { it }
+            }
+            openItemsMeeting = meeting
+        }
+        viewModel.consumeMeetingProcessedEvent()
+    }
 
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Main Tab selector
@@ -369,6 +390,7 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                         if (minutasProjectFilter == "Todos") meetings
                         else meetings.filter { it.jobTag.equals(minutasProjectFilter, ignoreCase = true) }
                     }
+                    val itemsByMeeting = remember(meetingItems) { meetingItems.groupBy { it.meetingId } }
 
                     LazyColumn(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -444,7 +466,9 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                 MeetingCard(
                                     meeting = meeting,
                                     onToggleConcluded = { viewModel.toggleMeetingConcluded(meeting) },
-                                    onEdit = { meetingToEdit = meeting }
+                                    onEdit = { meetingToEdit = meeting },
+                                    pendingItemCount = itemsByMeeting[meeting.id].orEmpty().count { it.status == "PENDIENTE" },
+                                    onOpenItems = { openItemsMeeting = meeting }
                                 )
                             }
                         }
@@ -545,6 +569,18 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
         )
     }
 
+    openItemsMeeting?.let { meeting ->
+        val itemsForMeeting = meetingItems.filter { it.meetingId == meeting.id }
+        MeetingItemsDialog(
+            meeting = meeting,
+            items = itemsForMeeting,
+            onDismiss = { openItemsMeeting = null },
+            onAdd = { viewModel.addMeetingItemToTasks(it) },
+            onDiscard = { viewModel.discardMeetingItem(it) },
+            onSetDate = { item, fecha -> viewModel.updateMeetingItemSchedule(item, fecha) }
+        )
+    }
+
     meetingToEdit?.let { meeting ->
         EditMeetingDialog(
             meeting = meeting,
@@ -637,7 +673,13 @@ private fun EditMeetingDialog(
 }
 
 @Composable
-fun MeetingCard(meeting: MeetingNote, onToggleConcluded: (() -> Unit)? = null, onEdit: (() -> Unit)? = null) {
+fun MeetingCard(
+    meeting: MeetingNote,
+    onToggleConcluded: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
+    pendingItemCount: Int = 0,
+    onOpenItems: (() -> Unit)? = null
+) {
     var isExpanded by remember { mutableStateOf(false) }
     val dateStr = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(meeting.dateTimestamp))
 
@@ -666,6 +708,26 @@ fun MeetingCard(meeting: MeetingNote, onToggleConcluded: (() -> Unit)? = null, o
             ) {
                 Text(meeting.title, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Spacer(modifier = Modifier.width(8.dp))
+
+                // Ítems detectados de la junta: badge ámbar mientras queden pendientes por revisar
+                if (onOpenItems != null) {
+                    Box {
+                        IconButton(onClick = onOpenItems, modifier = Modifier.size(28.dp).testTag("open_items_btn")) {
+                            Icon(Icons.Default.Checklist, contentDescription = "Ítems detectados de la junta", tint = CyanNeon, modifier = Modifier.size(16.dp))
+                        }
+                        if (pendingItemCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .size(9.dp)
+                                    .align(Alignment.TopEnd)
+                                    .clip(CircleShape)
+                                    .background(AmberWarning)
+                                    .border(1.dp, Slate900, CircleShape)
+                            )
+                        }
+                    }
+                }
+
                 if (onEdit != null) {
                     IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.Edit, contentDescription = "Editar junta", tint = Slate400, modifier = Modifier.size(15.dp))

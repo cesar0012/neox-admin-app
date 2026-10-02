@@ -11,6 +11,7 @@ import com.example.data.model.ConversationSession
 import com.example.data.model.DocumentItem
 import com.example.data.model.JobProject
 import com.example.data.model.MeetingNote
+import com.example.data.model.MeetingTaskItem
 import com.example.data.model.MemoryChunk
 import com.example.data.model.ProcessingQueueItem
 import com.example.data.model.VaultEntry
@@ -21,6 +22,7 @@ import com.example.data.model.WorkTask
         JobProject::class,
         WorkTask::class,
         MeetingNote::class,
+        MeetingTaskItem::class,
         DocumentItem::class,
         MemoryChunk::class,
         VaultEntry::class,
@@ -28,13 +30,14 @@ import com.example.data.model.WorkTask
         ConversationSession::class,
         ChatMessageEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun jobProjectDao(): JobProjectDao
     abstract fun taskDao(): TaskDao
     abstract fun meetingDao(): MeetingDao
+    abstract fun meetingItemDao(): MeetingTaskItemDao
     abstract fun documentDao(): DocumentDao
     abstract fun memoryDao(): MemoryDao
     abstract fun vaultDao(): VaultDao
@@ -103,6 +106,28 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v6: ítems detectados en juntas, pendientes de revisión del usuario antes de
+        // agregarse a sus tareas (pop-up de minutas)
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `meeting_task_items` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`meetingId` INTEGER NOT NULL, " +
+                        "`title` TEXT NOT NULL, " +
+                        "`contextQuote` TEXT NOT NULL, " +
+                        "`taskType` TEXT NOT NULL, " +
+                        "`priority` TEXT NOT NULL, " +
+                        "`dueTimestamp` INTEGER NOT NULL, " +
+                        "`hasTime` INTEGER NOT NULL, " +
+                        "`confidence` TEXT NOT NULL, " +
+                        "`status` TEXT NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_meeting_task_items_meetingId` ON `meeting_task_items` (`meetingId`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -110,7 +135,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "omniwork_vault.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
                     .build()
