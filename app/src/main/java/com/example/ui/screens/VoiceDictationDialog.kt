@@ -256,7 +256,9 @@ private fun appendSegment(current: String, segment: String): String {
 fun VoiceDictationDialog(
     onDismiss: () -> Unit,
     onSend: (String) -> Unit,
-    smartTranscribe: (suspend (ByteArray) -> Result<String>)? = null
+    smartTranscribe: (suspend (ByteArray) -> Result<String>)? = null,
+    sendLabel: String = "Enviar al asistente",
+    idleHint: String = "Habla, o toca aquí para escribir y corregir manualmente..."
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -701,7 +703,7 @@ fun VoiceDictationDialog(
                                         Spacer(modifier = Modifier.height(6.dp))
                                         Text(
                                             if (effectiveMode == "ia") "Habla con naturalidad: Whisper escribe por frases, con pausas ilimitadas..."
-                                            else "Habla, o toca aquí para escribir y corregir manualmente...",
+                                            else idleHint,
                                             color = Slate700,
                                             fontSize = 12.sp
                                         )
@@ -778,9 +780,11 @@ fun VoiceDictationDialog(
                         Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(17.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            if (sending) "Transcribiendo antes de enviar..." else "Enviar al asistente",
+                            if (sending) "Transcribiendo antes de enviar..." else sendLabel,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 

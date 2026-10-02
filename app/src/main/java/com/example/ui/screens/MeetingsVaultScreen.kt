@@ -1,15 +1,5 @@
 package com.example.ui.screens
 
-import android.app.Activity
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
-import android.provider.Settings
-import android.speech.RecognizerIntent
-import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -35,14 +25,11 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -51,6 +38,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Tab
@@ -69,7 +57,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -77,15 +64,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.MeetingNote
 import com.example.data.model.VaultEntry
-import com.example.data.speech.SpeechContextPolisher
-import com.example.service.FloatingMeetingService
 import com.example.ui.MainViewModel
 import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
-import com.example.ui.theme.RoseError
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
@@ -98,7 +82,6 @@ import java.util.Locale
 
 @Composable
 fun MeetingsVaultScreen(viewModel: MainViewModel) {
-    val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Captura y Dictado", "Minutas")
 
@@ -122,22 +105,8 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
     val isProcessing by viewModel.isMeetingProcessing.collectAsStateWithLifecycle()
 
     var liveTranscriptText by remember { mutableStateOf("") }
-    var isLiveRecordingActive by remember { mutableStateOf(false) }
+    var showMeetingDictation by remember { mutableStateOf(false) }
     var meetingToEdit by remember { mutableStateOf<MeetingNote?>(null) }
-
-    // Speech recognition launcher
-    val speechLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val spokenList = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            if (!spokenList.isNullOrEmpty()) {
-                val polished = SpeechContextPolisher.polishDictation(spokenList[0])
-                liveTranscriptText = if (liveTranscriptText.isEmpty()) polished else "$liveTranscriptText $polished"
-            }
-        }
-        isLiveRecordingActive = false
-    }
 
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Main Tab selector
@@ -169,97 +138,54 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
         }
 
         if (selectedTab == 0) {
-            // TAB 0: Captura y Dictado Exclusiva (Sin lista inferior acumulada)
+            // TAB 0: Grabadora de Juntas (dictado dual: Whisper IA + Google)
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
                 contentPadding = PaddingValues(top = 16.dp, bottom = 88.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Floating Overlay launcher card (For Microsoft Teams / Google Meet / Zoom)
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(20.dp),
                         colors = CardDefaults.cardColors(containerColor = Slate900),
-                        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate800))
+                        border = CardDefaults.outlinedCardBorder().copy(
+                            brush = androidx.compose.ui.graphics.SolidColor(CyanNeon.copy(alpha = 0.35f))
+                        )
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(modifier = Modifier.padding(18.dp)) {
+                            // ── Encabezado ──
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Icon(Icons.Default.Layers, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(20.dp))
-                                    Text("Captura Flotante en Segundo Plano", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(CyanNeon.copy(alpha = 0.15f))
+                                        .border(1.dp, CyanNeon.copy(alpha = 0.45f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Mic, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(22.dp))
+                                }
+                                Column {
+                                    Text("Grabadora de Juntas", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "Whisper IA por frases · Google de respaldo · pausas ilimitadas",
+                                        color = Slate400,
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
 
-                            Text(
-                                text = "Muestra una barra flotante sobre Microsoft Teams, Google Meet o Zoom para grabar audio de la reunión sin salir de la app de llamadas.",
-                                color = Slate400,
-                                fontSize = 12.sp,
-                                lineHeight = 16.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Button(
-                                onClick = {
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
-                                        val intent = Intent(
-                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                            Uri.parse("package:${context.packageName}")
-                                        )
-                                        context.startActivity(intent)
-                                        Toast.makeText(context, "Concede permiso de superposición para Teams/Meet", Toast.LENGTH_LONG).show()
-                                    } else {
-                                        val serviceIntent = Intent(context, FloatingMeetingService::class.java).apply {
-                                            putExtra(FloatingMeetingService.EXTRA_JOB_TAG, effectiveJobTag)
-                                        }
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                            context.startForegroundService(serviceIntent)
-                                        } else {
-                                            context.startService(serviceIntent)
-                                        }
-                                        Toast.makeText(context, "Barra flotante iniciada para $effectiveJobTag", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Slate800, contentColor = CyanNeon),
-                                modifier = Modifier.fillMaxWidth().testTag("launch_floating_btn")
-                            ) {
-                                Icon(Icons.Default.Layers, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Lanzar Barra Flotante (Sobre Teams / Meet)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-
-                // Fast On-The-Fly Voice Capture Card
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Slate900),
-                        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate700))
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(Icons.Default.Mic, contentDescription = null, tint = CyanNeon)
-                                Text("Captura Rápida de Voz y Juntas", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Text("Proyecto asignado a esta junta:", color = Slate400, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            Spacer(modifier = Modifier.height(6.dp))
+                            // ── Proyecto asignado ──
+                            Text("Proyecto asignado a la junta", color = Slate400, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(8.dp))
                             androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 val displayProjects = if (jobs.isEmpty()) listOf("General") else jobs.map { it.name }
                                 items(displayProjects) { pName ->
@@ -282,19 +208,34 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
 
+                            // ── Transcripción ──
+                            val wordCount = liveTranscriptText.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Transcripción de la junta", color = Slate400, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (wordCount == 0) "Sin contenido aún" else "$wordCount palabra" + (if (wordCount == 1) "" else "s"),
+                                    color = Slate700,
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
                             OutlinedTextField(
                                 value = liveTranscriptText,
                                 onValueChange = { liveTranscriptText = it },
                                 placeholder = {
                                     Text(
-                                        "Habla o pega aquí lo conversado para $effectiveJobTag. La IA detectará temas, extraerá tus tareas y guardará las citas textuales...",
+                                        "Graba la junta con IA o pega aquí lo conversado. La IA detectará temas, extraerá tus acciones y guardará citas textuales...",
                                         color = Slate400,
                                         fontSize = 13.sp
                                     )
                                 },
-                                modifier = Modifier.fillMaxWidth().height(140.dp).testTag("transcript_input"),
+                                modifier = Modifier.fillMaxWidth().height(150.dp).testTag("transcript_input"),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = TextPrimary,
                                     unfocusedTextColor = TextPrimary,
@@ -303,59 +244,73 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                 )
                             )
 
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(14.dp))
 
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Button(
-                                    onClick = {
-                                        isLiveRecordingActive = true
-                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
-                                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Habla para registrar la junta...")
-                                        }
-                                        try {
-                                            speechLauncher.launch(intent)
-                                        } catch (_: Exception) {
-                                            isLiveRecordingActive = false
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isLiveRecordingActive) RoseError else Slate800,
-                                        contentColor = if (isLiveRecordingActive) TextPrimary else CyanNeon
-                                    ),
-                                    modifier = Modifier.weight(1f).testTag("voice_record_btn")
-                                ) {
-                                    Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(if (isLiveRecordingActive) "Grabando..." else "Grabar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
+                            // ── Acciones ──
+                            Button(
+                                onClick = { showMeetingDictation = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("voice_record_btn")
+                            ) {
+                                Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Dictar / Grabar Junta", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
 
-                                Button(
-                                    onClick = {
-                                        if (liveTranscriptText.isNotBlank()) {
-                                            viewModel.captureMeetingAudioOrText(
-                                                jobTag = effectiveJobTag,
-                                                rawTranscript = liveTranscriptText
-                                            )
-                                            liveTranscriptText = ""
-                                        }
-                                    },
-                                    enabled = liveTranscriptText.isNotBlank() && !isProcessing,
-                                    colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
-                                    modifier = Modifier.weight(1.3f).testTag("process_summary_btn")
-                                ) {
-                                    if (isProcessing) {
-                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = OnCyan, strokeWidth = 2.dp)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Procesando...", fontSize = 12.sp)
-                                    } else {
-                                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Procesar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            OutlinedButton(
+                                onClick = {
+                                    if (liveTranscriptText.isNotBlank()) {
+                                        viewModel.captureMeetingAudioOrText(
+                                            jobTag = effectiveJobTag,
+                                            rawTranscript = liveTranscriptText
+                                        )
+                                        liveTranscriptText = ""
                                     }
+                                },
+                                enabled = liveTranscriptText.isNotBlank() && !isProcessing,
+                                shape = RoundedCornerShape(14.dp),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (liveTranscriptText.isNotBlank() && !isProcessing) CyanNeon.copy(alpha = 0.7f) else Slate700
+                                ),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = if (liveTranscriptText.isNotBlank() && !isProcessing) CyanNeon else Slate700
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(46.dp)
+                                    .testTag("process_summary_btn")
+                            ) {
+                                if (isProcessing) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = CyanNeon, strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Generando minuta...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "Procesar y Generar Minuta con IA",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                             }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "La grabación por frases funciona con la pantalla abierta: cada pausa natural cierra una frase y Whisper la transcribe al instante. Nada se pierde aunque pauses mucho tiempo. Al terminar, presiona Procesar y la IA genera la minuta con temas, acciones y citas textuales.",
+                                color = Slate700,
+                                fontSize = 9.sp,
+                                lineHeight = 13.sp
+                            )
                         }
                     }
                 }
@@ -576,6 +531,20 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
             }
         }
     }
+    if (showMeetingDictation) {
+        VoiceDictationDialog(
+            onDismiss = { showMeetingDictation = false },
+            onSend = { text ->
+                showMeetingDictation = false
+                liveTranscriptText = if (liveTranscriptText.isBlank()) text
+                else liveTranscriptText.trim().trimEnd('.', ' ') + " " + text
+            },
+            smartTranscribe = viewModel.smartDictationTranscriber,
+            sendLabel = "Insertar en la junta",
+            idleHint = "Habla la junta con naturalidad, o toca aquí para escribirla..."
+        )
+    }
+
     meetingToEdit?.let { meeting ->
         EditMeetingDialog(
             meeting = meeting,
