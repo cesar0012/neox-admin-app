@@ -1378,18 +1378,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { db.meetingItemDao().deleteItem(item) }
     }
 
-    /** Define/corrige la fecha de un ítem en lenguaje natural ("viernes a las 10 am"). */
-    fun updateMeetingItemSchedule(item: MeetingTaskItem, fechaText: String) {
+    /** Define/corrige la fecha y hora exactas de un ítem (desde los pickers del pop-up). */
+    fun updateMeetingItemSchedule(item: MeetingTaskItem, dueTimestamp: Long, hasTime: Boolean) {
         viewModelScope.launch {
-            val lower = fechaText.trim().lowercase(Locale.getDefault())
-            val hm = parseHourMinutes(lower)
-            val base = SpanishDateParser.resolveDueTimestamp(stripHourExpressions(lower))
-            val due = when {
-                base != null -> applyHourToTimestamp(base, hm)
-                hm != null -> nextOccurrenceAtHour(hm)
-                else -> return@launch // texto sin fecha ni hora: no cambiar nada
-            }
-            db.meetingItemDao().updateItem(item.copy(dueTimestamp = due, hasTime = hm != null))
+            db.meetingItemDao().updateItem(
+                item.copy(dueTimestamp = dueTimestamp.coerceAtLeast(0L), hasTime = hasTime)
+            )
+        }
+    }
+
+    /** Edita el título de una detección (datos base corregibles por el usuario). */
+    fun renameMeetingItem(item: MeetingTaskItem, newTitle: String) {
+        val t = newTitle.trim()
+        if (t.isEmpty()) return
+        viewModelScope.launch {
+            db.meetingItemDao().updateItem(item.copy(title = t))
         }
     }
 
