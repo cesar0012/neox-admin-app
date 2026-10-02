@@ -19,6 +19,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -332,15 +334,16 @@ fun VoiceDictationDialog(
     val micActive = hasPermission && wantsListening && !isEditing && !sending &&
         (effectiveMode == "ia" || engineAvailable)
 
-    // Motor IA: abrir/cerrar el micrófono según micActive (el hilo vive todo el modal)
+    // Motor IA: el micrófono se abre SOLO mientras se graba en modo IA, y se LIBERA por
+    // completo al pausar, editar o cambiar a Directo — si quedara abierto, degradaría el
+    // audio del reconocedor de Google (que corre en otro proceso del sistema).
     DisposableEffect(effectiveMode, micActive) {
         if (effectiveMode == "ia" && micActive) {
             recorder.start()
-            recorder.resumeCapture()
         } else {
-            recorder.suspendCapture()
+            recorder.stop()
         }
-        onDispose { recorder.suspendCapture() }
+        onDispose { recorder.stop() }
     }
 
     // Motor directo: conectar callbacks SIEMPRE que el composable se recomponga
@@ -810,6 +813,9 @@ fun VoiceDictationDialog(
                             },
                             enabled = !sending,
                             shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(
+                                horizontal = if (confirmClear) 6.dp else 12.dp, vertical = 8.dp
+                            ),
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(
@@ -818,11 +824,14 @@ fun VoiceDictationDialog(
                                 tint = if (confirmClear) AmberWarning else Slate400,
                                 modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                if (confirmClear) "¿Confirmar borrado?" else "Limpiar",
+                                if (confirmClear) "¿Borrar?" else "Limpiar",
                                 color = if (confirmClear) AmberWarning else Slate400,
-                                fontSize = 12.sp
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }

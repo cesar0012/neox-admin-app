@@ -89,38 +89,36 @@ class AudioSegmentRecorder(
     private var thread: Thread? = null
 
     @Volatile private var active = false        // hilo de captura vivo
-    @Volatile private var suspended = false     // pausa lógica: se lee pero no se segmenta
 
     // ── Parámetros de segmentación ──
-    private val silenceToCloseMs = 1_100L
+    private val silenceToCloseMs = 1_400L
     private val maxSegmentMs = 24_000L
-    private val minSpeechMs = 450L
+    private val minSpeechMs = 300L
     private val windowMs = 100L
 
     fun start() {
         if (active) return
         active = true
-        suspended = false
         thread = Thread({ captureLoop() }, "DictationRecorder").apply {
             priority = Thread.MAX_PRIORITY - 1
             start()
         }
     }
 
-    /** Pausa lógica: el micrófono sigue abierto pero no se generan segmentos. */
-    fun suspendCapture() { suspended = true }
-
-    /** Reanuda la segmentación (el hilo de captura sigue vivo). */
-    fun resumeCapture() { suspended = false }
-
-    fun release() {
+    /**
+     * Detiene la captura y LIBERA el micrófono por completo (flush de la frase en curso).
+     * Crítico: mantener el AudioRecord abierto aunque no se use degrada el audio de otros
+     * clientes del micrófono (el reconocedor de Google corre en otro proceso).
+     */
+    fun stop() {
         active = false
-        suspended = true
-        try { thread?.join(800) } catch (_: InterruptedException) {}
+        try { thread?.join(900) } catch (_: InterruptedException) {}
         thread = null
         try { audioRecord?.release() } catch (_: Exception) {}
         audioRecord = null
     }
+
+    fun release() = stop()
 
     @SuppressLint("MissingPermission") // el permiso se valida antes de crear el grabador
     private fun captureLoop() {
@@ -128,8 +126,10 @@ class AudioSegmentRecorder(
             sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
         val record = try {
+            // MIC (no VOICE_RECOGNITION): varios fabricantes aplican a VOICE_RECOGNITION
+            // supresión de ruido agresiva sin AGC que castiga la voz lejana del micrófono.
             AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION, sampleRate,
+                MediaRecorder.AudioSource.MIC, sampleRate,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                 maxOf(minBuf, sampleRate) // al menos 1s de buffer
             )
@@ -161,7 +161,7 @@ class AudioSegmentRecorder(
         var speechMs = 0L
         var silenceMs = 0L
         var hasSpeech = false
-        var noiseFloor = 350.0                            // piso de ruido adaptativo
+        var noiseFloor = 280.0                            // piso de ruido adaptativo
         var uiTick = 0
 
         while (active) {
@@ -173,56 +173,51 @@ class AudioSegmentRecorder(
             for (i in 0 until n) { val v = window[i].toDouble(); sum += v * v }
             val rms = Math.sqrt(sum / n)
 
-            // Piso de ruido adaptativo: baja rápido, sube lento
-            val speechThreshold = maxOf(noiseFloor * 2.8, 550.0)
-            if (rms < speechThreshold) noiseFloor = (noiseFloor * 0.96) + (rms * 0.04)
+            // Umbral de voz permisivo: capta voz a distancia sin que el ruido abra segmentos.
+            // El piso de ruido solo sube si la señal es claramente silenciosa y tiene tope.
+            val speechThreshold = maxOf(noiseFloor * 1.9, 380.0)
+            if (rms < noiseFloor * 1.4) {
+                noiseFloor = ((noiseFloor * 0.97) + (rms * 0.03)).coerceAtMost(1_400.0)
+            }
 
             val isSpeech = rms > speechThreshold
             if (++uiTick % 2 == 0) { // ~5 fps para el medidor
-                val norm = (((rms - noiseFloor) / 5200.0).coerceIn(0.0, 1.0)).toFloat()
+                val norm = (((rms - noiseFloor * 0.5) / 3200.0).coerceIn(0.0, 1.0)).toFloat()
                 onRms?.invoke(norm)
             }
 
-            if (!suspended) {
-                segMs += windowMs
-                if (isSpeech) {
-                    hasSpeech = true
-                    speechMs += windowMs
-                    silenceMs = 0
-                } else if (hasSpeech) {
-                    silenceMs += windowMs
-                }
+            segMs += windowMs
+            if (isSpeech) {
+                hasSpeech = true
+                speechMs += windowMs
+                silenceMs = 0
+            } else if (hasSpeech) {
+                silenceMs += windowMs
+            }
 
-                // Guardar audio del segmento (con un pequeño pre-roll de la ventana)
-                if (hasSpeech || speechMs > 0 || silenceMs > 0) {
-                    for (i in 0 until n) {
-                        pcm.add((window[i].toInt() and 0xFF).toByte())
-                        pcm.add((window[i].toInt() shr 8).toByte())
-                    }
+            // Guardar audio del segmento (incluye la ventana donde arranca la frase)
+            if (hasSpeech) {
+                for (i in 0 until n) {
+                    pcm.add((window[i].toInt() and 0xFF).toByte())
+                    pcm.add((window[i].toInt() shr 8).toByte())
                 }
+            }
 
-                val shouldClose = hasSpeech && (silenceMs >= silenceToCloseMs || segMs >= maxSegmentMs)
-                if (shouldClose) {
-                    if (speechMs >= minSpeechMs && pcm.size > 44) {
-                        onSegment?.invoke(wavFromPcm(pcm.toByteArray(), sampleRate))
-                    }
-                    pcm = ArrayList(sampleRate * 2)
-                    segMs = 0; speechMs = 0; silenceMs = 0; hasSpeech = false
-                } else if (!hasSpeech && segMs >= 3_000 && pcm.isNotEmpty()) {
-                    // Solo ruido ambiente acumulado sin habla: descartar
-                    pcm = ArrayList(sampleRate * 2)
-                    segMs = 0; speechMs = 0; silenceMs = 0
+            val shouldClose = hasSpeech && (silenceMs >= silenceToCloseMs || segMs >= maxSegmentMs)
+            if (shouldClose) {
+                if (speechMs >= minSpeechMs && pcm.size > 44) {
+                    onSegment?.invoke(wavFromPcm(pcm.toByteArray(), sampleRate))
                 }
-            } else if (hasSpeech && speechMs >= minSpeechMs && pcm.size > 44) {
-                // Pausa a mitad de frase: cerrar y entregar lo hablado antes de silenciar
-                onSegment?.invoke(wavFromPcm(pcm.toByteArray(), sampleRate))
                 pcm = ArrayList(sampleRate * 2)
                 segMs = 0; speechMs = 0; silenceMs = 0; hasSpeech = false
+            } else if (!hasSpeech && segMs >= 4_000) {
+                // Solo ruido ambiente acumulado sin habla: resetear contadores
+                segMs = 0
             }
         }
 
-        // Flush final: segmento en curso con habla pendiente
-        if (!suspended && hasSpeech && speechMs >= minSpeechMs && pcm.size > 44) {
+        // Flush final: frase en curso al detener la captura (pausa/cambio de modo/enviar)
+        if (hasSpeech && speechMs >= minSpeechMs && pcm.size > 44) {
             onSegment?.invoke(wavFromPcm(pcm.toByteArray(), sampleRate))
         }
         try { record.stop() } catch (_: Exception) {}
