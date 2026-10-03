@@ -30,6 +30,11 @@ data class WorkTask(
     @ColumnInfo(defaultValue = "ALTA") val confidence: String = ConfidenceLevels.ALTA, // ALTA, MEDIA, BAJA
     @ColumnInfo(defaultValue = "1") val hasTime: Boolean = true, // false = el usuario no especificó hora
     val originReference: String = "", // e.g. "Junta 28 Sep - Minuta de requerimientos"
+    // Evento recurrente: NINGUNA / DIARIA / SEMANAL / MENSUAL / ANUAL
+    @ColumnInfo(defaultValue = "NINGUNA") val recurrenceType: String = "NINGUNA",
+    // Ancla de la recurrencia: día de semana (LUNES..DOMINGO) para SEMANAL,
+    // día del mes (1-31) para MENSUAL o "dd/mm" para ANUAL
+    @ColumnInfo(defaultValue = "") val recurrenceAnchor: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -66,6 +71,8 @@ data class MeetingTaskItem(
     val hasTime: Boolean = false,    // true si se detectó hora explícita
     val confidence: String = "MEDIA",
     val status: String = "PENDIENTE", // PENDIENTE / AGREGADA / DESCARTADA
+    @ColumnInfo(defaultValue = "NINGUNA") val recurrenceType: String = "NINGUNA",
+    @ColumnInfo(defaultValue = "") val recurrenceAnchor: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 

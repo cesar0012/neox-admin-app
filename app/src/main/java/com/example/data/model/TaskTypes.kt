@@ -10,14 +10,18 @@ object TaskTypes {
     const val LLAMADA = "LLAMADA"
     const val ENTREGA = "ENTREGA"
     const val RECORDATORIO = "RECORDATORIO"
+    const val ALARMA = "ALARMA"
+    const val EVENTO = "EVENTO"
 
-    val ALL = listOf(TAREA, JUNTA, LLAMADA, ENTREGA, RECORDATORIO)
+    val ALL = listOf(TAREA, JUNTA, LLAMADA, ENTREGA, RECORDATORIO, ALARMA, EVENTO)
 
     fun labelOf(type: String): String = when (type) {
         JUNTA -> "Junta"
         LLAMADA -> "Llamada"
         ENTREGA -> "Entrega"
         RECORDATORIO -> "Recordatorio"
+        ALARMA -> "Alarma"
+        EVENTO -> "Evento"
         else -> "Tarea"
     }
 
@@ -28,6 +32,8 @@ object TaskTypes {
         containsAny(textLower, "junta", "reunion", "reunión", "meeting", "reunirse", "reunirnos") -> JUNTA
         containsAny(textLower, "llamada", "llamar", "llámale", "teléfono", "telefono", "marcarle") -> LLAMADA
         containsAny(textLower, "entregable", "entrega", "deadline", "envío", "envio", "enviar") -> ENTREGA
+        containsAny(textLower, "alarma", "despiértame", "despiertame", "suena", "suéname", "suename") -> ALARMA
+        containsAny(textLower, "evento recurrente", "evento periódico", "cada semana", "cada mes", "cada año", "cada ano", "todos los", "todas las") -> EVENTO
         containsAny(textLower, "recuérdame", "recuerdame", "recordatorio", "no olvidar", "recuérdalo") -> RECORDATORIO
         else -> TAREA
     }

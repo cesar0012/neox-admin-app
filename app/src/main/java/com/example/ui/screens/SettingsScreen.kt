@@ -4,22 +4,28 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.Shield
@@ -61,7 +67,7 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 
-private val SETTINGS_TABS = listOf("Rotador", "Wi-Fi PC", "Respaldo")
+private val SETTINGS_TABS = listOf("Rotador", "Wi-Fi PC", "Notif.", "Respaldo")
 
 /**
  * Sección unificada de Configuración: Rotador de modelos, puente Wi-Fi con la PC
@@ -87,6 +93,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 val tabIcon: ImageVector = when (idx) {
                     0 -> Icons.Default.RotateRight
                     1 -> Icons.Default.Laptop
+                    2 -> Icons.Default.Notifications
                     else -> Icons.Default.Download
                 }
                 val selected = selectedTab == idx
@@ -111,7 +118,114 @@ fun SettingsScreen(viewModel: MainViewModel) {
         when (selectedTab) {
             0 -> RotatorStatusScreen(viewModel = viewModel)
             1 -> DesktopBridgeScreen(viewModel = viewModel)
+            2 -> NotificationsSection(viewModel = viewModel)
             else -> BackupSection(viewModel = viewModel)
+        }
+    }
+}
+
+/**
+ * Configuración de notificaciones: anticipación global de los avisos y explicación
+ * del funcionamiento en segundo plano (alarmas del sistema que despiertan el móvil).
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun NotificationsSection(viewModel: MainViewModel) {
+    val context = LocalContext.current
+    var leadMinutes by remember { mutableIntStateOf(viewModel.prefs.getAdvanceNoticeMinutes()) }
+
+    val options = listOf(
+        0 to "A la hora exacta",
+        15 to "15 min antes",
+        30 to "30 min antes",
+        60 to "1 hora antes",
+        1440 to "1 día antes"
+    )
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 88.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(CyanNeon.copy(alpha = 0.35f))
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(
+                            modifier = Modifier.size(38.dp).clip(CircleShape).background(CyanNeon.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Notifications, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(19.dp))
+                        }
+                        Column {
+                            Text("Notificaciones en Segundo Plano", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text("Funcionan aunque cierres o olvides la app", color = Slate400, fontSize = 11.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "Las tareas y alarmas se registran con el programador del sistema Android (AlarmManager): " +
+                            "el celular despierta a la hora programada y la notificación suena aunque Neox Admin esté cerrada, " +
+                            "incluso después de reiniciar el teléfono. Las ALARMAS suenan con el tono de alarma del sistema y pantalla completa; " +
+                            "los eventos recurrentes se re-agendan solos a su siguiente ocurrencia.",
+                        color = Slate400,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate700))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Anticipación de los avisos", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Cuánto antes de la hora de cada tarea/alarma debe sonar el aviso.", color = Slate400, fontSize = 11.sp)
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        options.forEach { (mins, label) ->
+                            val isSelected = leadMinutes == mins
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(if (isSelected) CyanNeon else Slate800)
+                                    .border(1.dp, if (isSelected) CyanNeon else Slate700, RoundedCornerShape(14.dp))
+                                    .clickable {
+                                        leadMinutes = mins
+                                        viewModel.prefs.setAdvanceNoticeMinutes(mins)
+                                        com.example.data.notifications.AlarmScheduler.scheduleNext(context)
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    label,
+                                    color = if (isSelected) OnCyan else Slate400,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

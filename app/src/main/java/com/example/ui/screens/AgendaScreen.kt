@@ -50,6 +50,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Schedule
@@ -105,6 +107,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.MeetingNote
 import com.example.data.model.TaskTypes
 import com.example.data.model.WorkTask
+import com.example.data.nlp.RecurrenceHelper
 import com.example.ui.MainViewModel
 import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
@@ -317,8 +320,8 @@ fun AgendaScreen(viewModel: MainViewModel) {
             jobList = jobs.map { it.name },
             initialJob = if (selectedFilter != "Todos") selectedFilter ?: "General" else "General",
             onDismiss = { showAddTaskDialog = false },
-            onSave = { title, desc, jobTag, dueTime, priority, type, hasTime ->
-                viewModel.addTask(title, desc, jobTag, dueTime, priority, taskType = type, hasTime = hasTime)
+            onSave = { title, desc, jobTag, dueTime, priority, type, hasTime, recurrence ->
+                viewModel.addTask(title, desc, jobTag, dueTime, priority, taskType = type, hasTime = hasTime, recurrenceType = recurrence)
                 showAddTaskDialog = false
             }
         )
@@ -329,8 +332,8 @@ fun AgendaScreen(viewModel: MainViewModel) {
             task = task,
             jobList = jobs.map { it.name },
             onDismiss = { taskToEdit = null },
-            onSave = { title, desc, type, priority, due, job, hasTime ->
-                viewModel.updateTaskDetails(task, title, desc, type, priority, due, job, hasTime)
+            onSave = { title, desc, type, priority, due, job, hasTime, recurrence ->
+                viewModel.updateTaskDetails(task, title, desc, type, priority, due, job, hasTime, recurrence)
                 taskToEdit = null
             }
         )
@@ -1724,6 +1727,8 @@ private fun typeVisualOf(type: String): TypeVisual = when (type) {
     TaskTypes.LLAMADA -> TypeVisual("Llamada", Icons.Default.Phone, EmeraldSuccess)
     TaskTypes.ENTREGA -> TypeVisual("Entrega", Icons.Default.Flag, RoseError)
     TaskTypes.RECORDATORIO -> TypeVisual("Recordatorio", Icons.Default.NotificationsActive, AmberWarning)
+    TaskTypes.ALARMA -> TypeVisual("Alarma", Icons.Default.Alarm, RoseError)
+    TaskTypes.EVENTO -> TypeVisual("Evento", Icons.Default.Repeat, CyanNeon)
     else -> TypeVisual("Tarea", Icons.Default.CheckCircle, CyanNeon)
 }
 
@@ -1956,6 +1961,31 @@ fun TaskCard(
                                 fontSize = 10.sp,
                                 fontWeight = if (isOverdue || isDueToday) FontWeight.Bold else FontWeight.Normal
                             )
+                            if (RecurrenceHelper.isValid(task.recurrenceType) && task.recurrenceType != RecurrenceHelper.NONE) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(CyanNeon.copy(alpha = 0.15f))
+                                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Repeat,
+                                        contentDescription = null,
+                                        tint = CyanNeon,
+                                        modifier = Modifier.size(9.dp)
+                                    )
+                                    Text(
+                                        RecurrenceHelper.displayLabel(task.recurrenceType, task.recurrenceAnchor),
+                                        color = CyanNeon,
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
                         }
 
                         ConfidenceIndicator(task.confidence)
@@ -2055,13 +2085,14 @@ fun AddTaskDialog(
     jobList: List<String>,
     initialJob: String,
     onDismiss: () -> Unit,
-    onSave: (title: String, desc: String, jobTag: String, dueTime: Long, priority: String, taskType: String, hasTime: Boolean) -> Unit
+    onSave: (title: String, desc: String, jobTag: String, dueTime: Long, priority: String, taskType: String, hasTime: Boolean, recurrence: String) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var selectedJob by remember { mutableStateOf(initialJob) }
     var selectedPriority by remember { mutableStateOf("MEDIA") }
     var selectedType by remember { mutableStateOf(TaskTypes.TAREA) }
+    var selectedRecurrence by remember { mutableStateOf(RecurrenceHelper.NONE) }
 
     val now = remember { System.currentTimeMillis() }
     var selectedDue by remember { mutableStateOf(now + 86400_000L) } // Mañana por defecto
@@ -2117,6 +2148,28 @@ fun AddTaskDialog(
                     onHasTimeChange = { selectedHasTime = it }
                 )
 
+                Text("Repetición (evento recurrente):", color = Slate400, fontSize = 12.sp)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    RecurrenceHelper.ALL.forEach { rec ->
+                        FilterChip(
+                            label = if (rec == RecurrenceHelper.NONE) "Sin repetir" else RecurrenceHelper.labelOf(rec),
+                            isSelected = selectedRecurrence == rec,
+                            onClick = { selectedRecurrence = rec },
+                            leadingIcon = if (rec == RecurrenceHelper.NONE) Icons.Default.Close else Icons.Default.Repeat
+                        )
+                    }
+                }
+                if (selectedRecurrence != RecurrenceHelper.NONE) {
+                    Text(
+                        "Se re-agenda solo a la siguiente ocurrencia al completarse o pasar su hora.",
+                        color = CyanNeon.copy(alpha = 0.8f),
+                        fontSize = 9.sp
+                    )
+                }
+
                 Text("Proyecto / Trabajo:", color = Slate400, fontSize = 12.sp)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     val displayJobs = if (jobList.isEmpty()) listOf("General", "Trabajo 1", "Freelance") else jobList
@@ -2148,7 +2201,7 @@ fun AddTaskDialog(
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onSave(title, description, selectedJob, selectedDue, selectedPriority, selectedType, selectedHasTime)
+                        onSave(title, description, selectedJob, selectedDue, selectedPriority, selectedType, selectedHasTime, selectedRecurrence)
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
@@ -2171,9 +2224,10 @@ fun EditTaskDialog(
     task: WorkTask,
     jobList: List<String>,
     onDismiss: () -> Unit,
-    onSave: (title: String, desc: String, type: String, priority: String, due: Long, jobTag: String, hasTime: Boolean) -> Unit
+    onSave: (title: String, desc: String, type: String, priority: String, due: Long, jobTag: String, hasTime: Boolean, recurrence: String) -> Unit
 ) {
     var title by remember(task.id) { mutableStateOf(task.title) }
+    var selectedRecurrence by remember(task.id) { mutableStateOf(if (RecurrenceHelper.isValid(task.recurrenceType)) task.recurrenceType else RecurrenceHelper.NONE) }
     var description by remember(task.id) { mutableStateOf(task.description) }
     var selectedType by remember(task.id) { mutableStateOf(if (TaskTypes.isValid(task.taskType)) task.taskType else TaskTypes.TAREA) }
     var selectedPriority by remember(task.id) { mutableStateOf(task.priority) }
@@ -2246,6 +2300,28 @@ fun EditTaskDialog(
                     onHasTimeChange = { selectedHasTime = it }
                 )
 
+                Text("Repetición (evento recurrente):", color = Slate400, fontSize = 12.sp)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    RecurrenceHelper.ALL.forEach { rec ->
+                        FilterChip(
+                            label = if (rec == RecurrenceHelper.NONE) "Sin repetir" else RecurrenceHelper.labelOf(rec),
+                            isSelected = selectedRecurrence == rec,
+                            onClick = { selectedRecurrence = rec },
+                            leadingIcon = if (rec == RecurrenceHelper.NONE) Icons.Default.Close else Icons.Default.Repeat
+                        )
+                    }
+                }
+                if (selectedRecurrence != RecurrenceHelper.NONE) {
+                    Text(
+                        "Se re-agenda solo a la siguiente ocurrencia al completarse o pasar su hora.",
+                        color = CyanNeon.copy(alpha = 0.8f),
+                        fontSize = 9.sp
+                    )
+                }
+
                 if (jobList.isNotEmpty()) {
                     Text("Proyecto / Trabajo:", color = Slate400, fontSize = 12.sp)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2264,7 +2340,7 @@ fun EditTaskDialog(
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onSave(title, description, selectedType, selectedPriority, selectedDue, selectedJob, selectedHasTime)
+                        onSave(title, description, selectedType, selectedPriority, selectedDue, selectedJob, selectedHasTime, selectedRecurrence)
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan)

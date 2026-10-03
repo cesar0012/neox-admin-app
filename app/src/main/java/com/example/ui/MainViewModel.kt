@@ -18,6 +18,7 @@ import com.example.data.model.ProcessingQueueItem
 import com.example.data.model.TaskTypes
 import com.example.data.model.VaultEntry
 import com.example.data.model.WorkTask
+import com.example.data.nlp.RecurrenceHelper
 import com.example.data.nlp.SpanishDateParser
 import com.example.data.notifications.ReminderNotificationHelper
 import com.example.data.preferences.AppPreferences
@@ -297,9 +298,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val benchmarkingActive: StateFlow<Boolean> = _benchmarkingActive.asStateFlow()
 
     init {
-        // Initialize notifications
+        // Initialize notifications + alarmas del sistema (funcionan con la app cerrada)
         try {
             ReminderNotificationHelper.initNotificationChannel(application)
+            com.example.data.notifications.AlarmScheduler.scheduleNext(application)
         } catch (t: Throwable) {
             android.util.Log.e("MainViewModel", "Notification channel init error: ${t.message}", t)
         }
@@ -463,7 +465,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val dueTimestamp: Long, // 0 = sin fecha especificada
         val confidence: String,
         val viaLLM: Boolean,
-        val hasTime: Boolean = true // false = el usuario no especificó hora
+        val hasTime: Boolean = true, // false = el usuario no especificó hora
+        val recurrenceType: String = RecurrenceHelper.NONE // evento recurrente
     )
 
     /** Resultado del sub-agente extractor: puede decidir que el mensaje NO es una orden de agenda. */
@@ -529,6 +532,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             REGLAS DE FECHA:
             - Devuelve la fecha en lenguaje natural tal cual se entiende ("viernes", "mañana", "en 3 días", "25/12/2026") o "sin fecha" si el usuario no mencionó ninguna. NUNCA fechas pasadas.
 
+            REGLAS DE RECURRENCIA (eventos que se repiten):
+            - Si el usuario pidió algo que se REPITE ("todos los miércoles a las 10", "cada lunes", "cada mes", "cada año", "diario", "reporte semanal"), escribe el tipo: diaria / semanal / mensual / anual.
+            - En FECHA escribe la PRIMERA ocurrencia (el próximo miércoles, etc.).
+            - Si no se repite, escribe "ninguna".
+
             REGLAS DE HORA (CRÍTICAS):
             - CUALQUIER hora que el usuario mencione —"a las 3", "15:30", "10 am", "10 de la mañana", "3 y media de la tarde", "10 de la noche", "mediodía"— va en la sección HORA en formato HH:mm de 24h. Conversiones: 10 de la mañana=10:00, 3 de la tarde=15:00, 10 pm=22:00, 12 am=00:00, 3 y media=03:30, mediodía=12:00.
             - La hora que el usuario dice SIEMPRE se agenda en la sección HORA. JAMÁS la consignes únicamente en la DESCRIPCIÓN: si la dijo, es porque quiere que quede agendada a esa hora.
@@ -551,6 +559,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             [HH:mm o "sin hora"]
             ---CONFIANZA---
             [ALTA si el pedido fue claro; MEDIA si es ambiguo o implícito; BAJA si es muy incierto]
+            ---RECURRENCIA---
+            [ninguna / diaria / semanal / mensual / anual]
         """.trimIndent()
 
         val userPrompt = "Proyecto activo: $activeProject\n$history\nMENSAJE DEL USUARIO:\n$userText"
@@ -581,7 +591,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val prioRaw = section("---PRIORIDAD---", "---FECHA---").uppercase(Locale.getDefault()).trim()
         val fechaText = section("---FECHA---", "---HORA---").trim()
         val horaText = section("---HORA---", "---CONFIANZA---").trim()
-        val confRaw = section("---CONFIANZA---", "---FIN---").uppercase(Locale.getDefault()).trim()
+        val confRaw = section("---CONFIANZA---", "---RECURRENCIA---").uppercase(Locale.getDefault()).trim()
+        val recRaw = section("---RECURRENCIA---", "---FIN---")
 
         val due = resolveDateTextToTimestamp(fechaText, horaText)
         return TaskExtraction.Details(
@@ -593,7 +604,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 dueTimestamp = due,
                 confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.MEDIA,
                 viaLLM = true,
-                hasTime = hasExplicitHour(horaText)
+                hasTime = hasExplicitHour(horaText),
+                // Red de seguridad: si el texto del usuario claramente describe repetición, gana
+                recurrenceType = RecurrenceHelper.normalize(recRaw).ifEmpty {
+                    RecurrenceHelper.detectFromText(userText)
+                }
             )
         )
     }
@@ -902,11 +917,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         originRef: String = "",
         taskType: String = TaskTypes.TAREA,
         confidence: String = ConfidenceLevels.ALTA,
-        hasTime: Boolean = true
+        hasTime: Boolean = true,
+        recurrenceType: String = RecurrenceHelper.NONE
     ) {
         viewModelScope.launch {
             val safeType = if (TaskTypes.isValid(taskType)) taskType else TaskTypes.TAREA
             val safeConfidence = if (ConfidenceLevels.isValid(confidence)) confidence else ConfidenceLevels.ALTA
+            val safeRec = if (RecurrenceHelper.isValid(recurrenceType)) recurrenceType else RecurrenceHelper.NONE
             val task = WorkTask(
                 title = title,
                 description = description,
@@ -916,9 +933,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 taskType = safeType,
                 confidence = safeConfidence,
                 hasTime = hasTime,
-                originReference = originRef
+                originReference = originRef,
+                recurrenceType = safeRec,
+                recurrenceAnchor = RecurrenceHelper.anchorFor(safeRec, dueTimestamp)
             )
             val id = db.taskDao().insertTask(task)
+            rescheduleAlarms()
 
             // Index in RAG memory
             ragEngine.indexContent(
@@ -953,9 +973,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         newPriority: String,
         newDueTimestamp: Long,
         newJobTag: String,
-        newHasTime: Boolean = true
+        newHasTime: Boolean = true,
+        newRecurrenceType: String = task.recurrenceType
     ) {
         viewModelScope.launch {
+            val safeRec = if (RecurrenceHelper.isValid(newRecurrenceType)) newRecurrenceType else RecurrenceHelper.NONE
             val updated = task.copy(
                 title = newTitle.trim(),
                 description = newDescription.trim(),
@@ -963,9 +985,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 priority = newPriority,
                 dueTimestamp = newDueTimestamp,
                 jobTag = newJobTag,
-                hasTime = newHasTime
+                hasTime = newHasTime,
+                recurrenceType = safeRec,
+                recurrenceAnchor = RecurrenceHelper.anchorFor(safeRec, newDueTimestamp)
             )
             db.taskDao().updateTask(updated)
+            rescheduleAlarms()
             db.memoryDao().deleteChunksBySource(updated.id, "TASK")
             ragEngine.indexContent(
                 updated.id, "TASK", updated.title, updated.jobTag,
@@ -990,8 +1015,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleTaskCompletion(task: WorkTask) {
         viewModelScope.launch {
             val newCompleted = !task.isCompleted
+            if (newCompleted && task.recurrenceType != RecurrenceHelper.NONE) {
+                // Evento recurrente: completar una ocurrencia rueda a la siguiente
+                val next = RecurrenceHelper.nextOccurrenceAfter(task.recurrenceType, task.recurrenceAnchor, task.dueTimestamp)
+                if (next != null) {
+                    db.taskDao().updateTask(task.copy(dueTimestamp = next))
+                    rescheduleAlarms()
+                    return@launch
+                }
+            }
             val newStatus = if (newCompleted) "TERMINADO" else "PENDIENTE"
             db.taskDao().updateTaskStatus(task.id, newStatus, newCompleted)
+            rescheduleAlarms()
         }
     }
 
@@ -999,7 +1034,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val completed = newStatus == "TERMINADO"
             db.taskDao().updateTaskStatus(task.id, newStatus, completed)
+            rescheduleAlarms()
         }
+    }
+
+    /** Re-programa la próxima alarma del sistema tras cualquier cambio de tareas. */
+    private fun rescheduleAlarms() {
+        com.example.data.notifications.AlarmScheduler.scheduleNext(getApplication())
     }
 
     fun toggleMeetingConcluded(meeting: MeetingNote) {
@@ -1023,6 +1064,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             db.taskDao().deleteTask(task)
             db.memoryDao().deleteChunksBySource(task.id, "TASK")
+            rescheduleAlarms()
         }
     }
 
@@ -1234,7 +1276,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
               "3 y media de la tarde"→15:30, "10 pm"→22:00) o "sin hora". La hora que se mencionó
               SIEMPRE va en este campo, nunca únicamente en la cita.
             - CONFIANZA: ALTA si quedó claro, MEDIA si ambiguo, BAJA si muy incierto.
-            - CITA: la frase textual de la junta donde se mencionó el compromiso, INCLUYENDO cualquier
+            - RECURRENCIA: si el compromiso SE REPITE ("todos los miercoles a las 10", "cada lunes",
+              "reporte semanal", "cada mes", "cada ano", "diario") escribe diaria / semanal / mensual /
+              anual; si no, "ninguna". En FECHA escribe la primera ocurrencia.
+            - CITA: la frase textual de la junta donde se menciono el compromiso, INCLUYENDO cualquier
               fecha u hora dicha (respaldo para rescatar datos faltantes).
 
             Responde SOLO bloques como el ejemplo, uno por compromiso, sin texto extra.
@@ -1246,6 +1291,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             FECHA: mañana
             HORA: 10:00
             CONFIANZA: ALTA
+            RECURRENCIA: ninguna
             CITA: Necesitamos agendar una junta para el día de mañana a las 10 de la mañana para revisar los templates.
         """.trimIndent()
 
@@ -1287,6 +1333,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val fechaRaw = field(block, "FECHA:", "FECHA")
             val horaRaw = field(block, "HORA:", "HORA")
             val cita = field(block, "CITA:", "CITA")
+            val recRaw = field(block, "RECURRENCIA:", "RECURRENCIA")
+            val recurrencia = RecurrenceHelper.normalize(recRaw).ifEmpty {
+                RecurrenceHelper.detectFromText(cita.ifBlank { fechaRaw })
+            }
 
             // Resolución con los mismos lineamientos del asistente + red de seguridad
             // determinista sobre la cita textual (rescata fecha/hora si el modelo falló)
@@ -1320,7 +1370,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     dueTimestamp = due,
                     hasTime = withTime,
                     confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.MEDIA,
-                    status = "PENDIENTE"
+                    status = "PENDIENTE",
+                    recurrenceType = recurrencia,
+                    recurrenceAnchor = RecurrenceHelper.anchorFor(recurrencia, due)
                 )
             )
         }
@@ -1349,9 +1401,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     taskType = if (TaskTypes.isValid(item.taskType)) item.taskType else TaskTypes.TAREA,
                     confidence = if (ConfidenceLevels.isValid(item.confidence)) item.confidence else ConfidenceLevels.MEDIA,
                     hasTime = item.hasTime,
-                    originReference = "Junta: ${meeting?.title.orEmpty()}"
+                    originReference = "Junta: ${meeting?.title.orEmpty()}",
+                    recurrenceType = item.recurrenceType,
+                    recurrenceAnchor = item.recurrenceAnchor.ifBlank {
+                        RecurrenceHelper.anchorFor(item.recurrenceType, item.dueTimestamp)
+                    }
                 )
             )
+            rescheduleAlarms()
             ragEngine.indexContent(
                 sourceId = taskId,
                 sourceType = "TASK",
@@ -1576,9 +1633,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                   * titulo: CORTO (máx 8 palabras), técnico y orientado a acción. NUNCA frases literales del usuario ni sus opiniones ("no me gustó..." jamás va en un título). Junta → "Junta: ...".
                   * prioridad: ALTA / MEDIA / BAJA.
                   * fechaTexto: la fecha en lenguaje natural tal como la entiendes ("viernes", "mañana", "en 3 días", "25/12/2026") o "-" si el usuario NO mencionó fecha.
-                  * tipo: TAREA / JUNTA / LLAMADA / ENTREGA / RECORDATORIO (según lo pedido: reunión=junta, llamada telefónica=llamada, deadline o envío=entrega).
+                  * tipo: TAREA / JUNTA / LLAMADA / ENTREGA / RECORDATORIO / ALARMA / EVENTO (reunión=junta, llamada telefónica=llamada, deadline o envío=entrega; ALARMA cuando el usuario pida que le avise/suene a una hora exacta; EVENTO para compromisos periódicos genéricos).
+                  * recurrencia (8º parámetro): diaria / semanal / mensual / anual cuando el usuario pida algo que SE REPITE ("todos los miércoles a las 10", "cada lunes", "reporte semanal", "cada mes", "cada año", "diario"); en fechaTexto escribe la PRIMERA ocurrencia. Si no se repite, omítelo o escribe "ninguna".
                   * confianza: ALTA si el pedido fue claro, MEDIA si ambiguo, BAJA si muy incierto.
-                  * hora: HH:mm (24h) si el usuario la mencionó, o "sin hora" si no. Convierte CUALQUIER formato que use ("10 de la mañana"→10:00, "10 am"→10:00, "3 de la tarde"→15:00, "3 y media"→03:30, "10 de la noche"→22:00). La hora SIEMPRE se agenda en este parámetro: NUNCA la dejes únicamente en la descripción o en el texto de tu respuesta.
+                  * hora: HH:mm (24h) si el usuario la mencionó, o "sin hora" si no (en alarmas SIEMPRE debe haber hora). Convierte CUALQUIER formato que use ("10 de la mañana"→10:00, "10 am"→10:00, "3 de la tarde"→15:00, "3 y media"→03:30, "10 de la noche"→22:00). La hora SIEMPRE se agenda en este parámetro: NUNCA la dejes únicamente en la descripción o en el texto de tu respuesta.
                 - Para re-agendar/cambiar fecha (incluye cuando el usuario corrige una fecha mal agendada):
                   ---ACTION:RESCHEDULE_TASK|titulo|fechaTexto---
                 - Para concluir tarea: ---ACTION:COMPLETE_TASK|titulo---
@@ -1695,12 +1753,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         return when (actionType) {
             "CREATE_TASK" -> {
-                // ACTION:CREATE_TASK|titulo|prioridad|fechaTexto|tipo|confianza|hora(opcional HH:mm)
+                // ACTION:CREATE_TASK|titulo|prioridad|fechaTexto|tipo|confianza|hora|recurrencia(opcional)
                 val parts = payload.split("|")
                 val title = parts.getOrNull(0)?.trim()?.ifBlank { "Nueva tarea" } ?: "Nueva tarea"
                 val priority = parts.getOrNull(1)?.trim()?.uppercase(Locale.getDefault()) ?: "MEDIA"
                 val fechaRaw = parts.getOrNull(2)?.trim().orEmpty()
                 val horaRaw = parts.getOrNull(5)?.trim().orEmpty()
+                val recurrencia = RecurrenceHelper.normalize(parts.getOrNull(6)?.trim()).ifEmpty {
+                    RecurrenceHelper.detectFromText(fechaRaw)
+                }
                 // La hora puede venir en el parámetro hora O embebida en fechaTexto:
                 // se considera explícita si aparece en cualquiera de los dos.
                 val hm = parseHourMinutes("$fechaRaw $horaRaw")
@@ -1724,9 +1785,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     taskType = if (TaskTypes.isValid(typeRaw)) typeRaw else TaskTypes.TAREA,
                     confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.ALTA,
                     hasTime = withTime,
-                    originReference = "Asistente Conversacional"
+                    originReference = "Asistente Conversacional",
+                    recurrenceType = recurrencia,
+                    recurrenceAnchor = RecurrenceHelper.anchorFor(recurrencia, due)
                 )
                 val id = db.taskDao().insertTask(task)
+                rescheduleAlarms()
                 ragEngine.indexContent(
                     id, "TASK", title, activeProject,
                     "Tarea: $title. Tipo: ${TaskTypes.labelOf(task.taskType)}. Proyecto: $activeProject."
@@ -1761,6 +1825,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 hasTime = withTime || target.hasTime
                             )
                         )
+                        rescheduleAlarms()
                         val horaTxt = if (withTime) "" else " *(sin hora específica: 9:00 por defecto)*"
                         "\n\n✅ *[Acción ejecutada: Tarea \"${target.title}\" re-agendada: ${formatDueForHumans(due)}$horaTxt en $activeProject]*"
                     } else {
@@ -1976,9 +2041,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 taskType = extracted.taskType,
                 confidence = extracted.confidence,
                 hasTime = extracted.hasTime,
-                originReference = "Asistente ($activeProject)" + if (extracted.viaLLM) "" else " (sin LLM)"
+                originReference = "Asistente ($activeProject)" + if (extracted.viaLLM) "" else " (sin LLM)",
+                recurrenceType = extracted.recurrenceType,
+                recurrenceAnchor = RecurrenceHelper.anchorFor(extracted.recurrenceType, extracted.dueTimestamp)
             )
             val taskId = db.taskDao().insertTask(task)
+            rescheduleAlarms()
             ragEngine.indexContent(
                 sourceId = taskId,
                 sourceType = "TASK",
