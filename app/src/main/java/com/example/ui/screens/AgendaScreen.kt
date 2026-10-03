@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Notes
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Repeat
@@ -108,6 +109,7 @@ import com.example.data.model.MeetingNote
 import com.example.data.model.TaskTypes
 import com.example.data.model.WorkTask
 import com.example.data.nlp.RecurrenceHelper
+import com.example.data.notifications.NotificationLeads
 import com.example.ui.MainViewModel
 import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
@@ -319,9 +321,10 @@ fun AgendaScreen(viewModel: MainViewModel) {
         AddTaskDialog(
             jobList = jobs.map { it.name },
             initialJob = if (selectedFilter != "Todos") selectedFilter ?: "General" else "General",
+            initialNotifLeads = viewModel.prefs.getNotifLeadDefaults(),
             onDismiss = { showAddTaskDialog = false },
-            onSave = { title, desc, jobTag, dueTime, priority, type, hasTime, recurrence ->
-                viewModel.addTask(title, desc, jobTag, dueTime, priority, taskType = type, hasTime = hasTime, recurrenceType = recurrence)
+            onSave = { title, desc, jobTag, dueTime, priority, type, hasTime, recurrence, leadsCsv ->
+                viewModel.addTask(title, desc, jobTag, dueTime, priority, taskType = type, hasTime = hasTime, recurrenceType = recurrence, notifLeadsCsv = leadsCsv)
                 showAddTaskDialog = false
             }
         )
@@ -331,9 +334,10 @@ fun AgendaScreen(viewModel: MainViewModel) {
         EditTaskDialog(
             task = task,
             jobList = jobs.map { it.name },
+            defaultNotifLeads = viewModel.prefs.getNotifLeadDefaults(),
             onDismiss = { taskToEdit = null },
-            onSave = { title, desc, type, priority, due, job, hasTime, recurrence ->
-                viewModel.updateTaskDetails(task, title, desc, type, priority, due, job, hasTime, recurrence)
+            onSave = { title, desc, type, priority, due, job, hasTime, recurrence, leadsCsv ->
+                viewModel.updateTaskDetails(task, title, desc, type, priority, due, job, hasTime, recurrence, leadsCsv)
                 taskToEdit = null
             }
         )
@@ -1782,6 +1786,7 @@ fun TaskCard(
     onEdit: () -> Unit = {}
 ) {
     val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    val context = androidx.compose.ui.platform.LocalContext.current
     val dateFormat = SimpleDateFormat("EEE d MMM", Locale.getDefault())
     val priorityColor = when (task.priority) {
         "ALTA" -> RoseError
@@ -1961,8 +1966,34 @@ fun TaskCard(
                                 fontSize = 10.sp,
                                 fontWeight = if (isOverdue || isDueToday) FontWeight.Bold else FontWeight.Normal
                             )
+                            val effLeads = NotificationLeads.effectiveFor(
+                                task.notifLeadsCsv,
+                                remember { com.example.data.preferences.AppPreferences(context).getNotifLeadDefaults() }
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Slate800)
+                                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Notifications,
+                                    contentDescription = "Cuándo se notifica",
+                                    tint = if (task.notifLeadsCsv.isBlank()) Slate400 else CyanNeon,
+                                    modifier = Modifier.size(9.dp)
+                                )
+                                Text(
+                                    NotificationLeads.summary(effLeads) + if (task.notifLeadsCsv.isBlank()) "" else " (propio)",
+                                    color = if (task.notifLeadsCsv.isBlank()) Slate400 else CyanNeon,
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
                             if (RecurrenceHelper.isValid(task.recurrenceType) && task.recurrenceType != RecurrenceHelper.NONE) {
-                                Spacer(modifier = Modifier.width(6.dp))
                                 Row(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
@@ -2085,7 +2116,8 @@ fun AddTaskDialog(
     jobList: List<String>,
     initialJob: String,
     onDismiss: () -> Unit,
-    onSave: (title: String, desc: String, jobTag: String, dueTime: Long, priority: String, taskType: String, hasTime: Boolean, recurrence: String) -> Unit
+    initialNotifLeads: Set<Int>,
+    onSave: (title: String, desc: String, jobTag: String, dueTime: Long, priority: String, taskType: String, hasTime: Boolean, recurrence: String, notifLeadsCsv: String) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
@@ -2093,6 +2125,7 @@ fun AddTaskDialog(
     var selectedPriority by remember { mutableStateOf("MEDIA") }
     var selectedType by remember { mutableStateOf(TaskTypes.TAREA) }
     var selectedRecurrence by remember { mutableStateOf(RecurrenceHelper.NONE) }
+    var selectedLeads by remember { mutableStateOf(initialNotifLeads) }
 
     val now = remember { System.currentTimeMillis() }
     var selectedDue by remember { mutableStateOf(now + 86400_000L) } // Mañana por defecto
@@ -2170,6 +2203,12 @@ fun AddTaskDialog(
                     )
                 }
 
+                Text("Notificar antes:", color = Slate400, fontSize = 12.sp)
+                NotifLeadsEditor(
+                    selected = selectedLeads,
+                    onSelectionChange = { selectedLeads = it }
+                )
+
                 Text("Proyecto / Trabajo:", color = Slate400, fontSize = 12.sp)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     val displayJobs = if (jobList.isEmpty()) listOf("General", "Trabajo 1", "Freelance") else jobList
@@ -2201,7 +2240,7 @@ fun AddTaskDialog(
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onSave(title, description, selectedJob, selectedDue, selectedPriority, selectedType, selectedHasTime, selectedRecurrence)
+                        onSave(title, description, selectedJob, selectedDue, selectedPriority, selectedType, selectedHasTime, selectedRecurrence, NotificationLeads.toCsv(selectedLeads))
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
@@ -2224,10 +2263,16 @@ fun EditTaskDialog(
     task: WorkTask,
     jobList: List<String>,
     onDismiss: () -> Unit,
-    onSave: (title: String, desc: String, type: String, priority: String, due: Long, jobTag: String, hasTime: Boolean, recurrence: String) -> Unit
+    defaultNotifLeads: Set<Int>,
+    onSave: (title: String, desc: String, type: String, priority: String, due: Long, jobTag: String, hasTime: Boolean, recurrence: String, notifLeadsCsv: String) -> Unit
 ) {
     var title by remember(task.id) { mutableStateOf(task.title) }
     var selectedRecurrence by remember(task.id) { mutableStateOf(if (RecurrenceHelper.isValid(task.recurrenceType)) task.recurrenceType else RecurrenceHelper.NONE) }
+    val inheritsDefaults = task.notifLeadsCsv.isBlank()
+    var selectedLeads by remember(task.id, task.notifLeadsCsv) {
+        mutableStateOf(NotificationLeads.effectiveFor(task.notifLeadsCsv, defaultNotifLeads))
+    }
+    var usingDefault by remember(task.id) { mutableStateOf(inheritsDefaults) }
     var description by remember(task.id) { mutableStateOf(task.description) }
     var selectedType by remember(task.id) { mutableStateOf(if (TaskTypes.isValid(task.taskType)) task.taskType else TaskTypes.TAREA) }
     var selectedPriority by remember(task.id) { mutableStateOf(task.priority) }
@@ -2322,6 +2367,37 @@ fun EditTaskDialog(
                     )
                 }
 
+                Text("Notificar antes:", color = Slate400, fontSize = 12.sp)
+                if (usingDefault) {
+                    Text(
+                        "Usando la omisión de Config (${NotificationLeads.summary(selectedLeads)}). Personalízalas aquí si esta tarea necesita otros tiempos.",
+                        color = CyanNeon.copy(alpha = 0.75f),
+                        fontSize = 9.sp
+                    )
+                }
+                NotifLeadsEditor(
+                    selected = selectedLeads,
+                    onSelectionChange = {
+                        selectedLeads = it
+                        usingDefault = false
+                    }
+                )
+                if (!usingDefault) {
+                    Text(
+                        "Quitar personalización y volver a la omisión de Config",
+                        color = Slate400,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                usingDefault = true
+                                selectedLeads = defaultNotifLeads
+                            }
+                            .padding(vertical = 2.dp)
+                    )
+                }
+
                 if (jobList.isNotEmpty()) {
                     Text("Proyecto / Trabajo:", color = Slate400, fontSize = 12.sp)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2340,7 +2416,7 @@ fun EditTaskDialog(
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onSave(title, description, selectedType, selectedPriority, selectedDue, selectedJob, selectedHasTime, selectedRecurrence)
+                        onSave(title, description, selectedType, selectedPriority, selectedDue, selectedJob, selectedHasTime, selectedRecurrence, if (usingDefault) "" else NotificationLeads.toCsv(selectedLeads))
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan)

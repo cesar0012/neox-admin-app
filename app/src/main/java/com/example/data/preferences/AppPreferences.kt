@@ -32,6 +32,22 @@ class AppPreferences(context: Context) {
 
     fun getAdvanceNoticeMinutes(): Int = prefs.getInt("advance_notice_min", 30)
 
+    /** Anticipaciones de notificación por OMISIÓN (multi-selección, en minutos). */
+    fun getNotifLeadDefaults(): Set<Int> =
+        com.example.data.notifications.NotificationLeads.parseCsv(prefs.getString("notif_leads_defaults", "60,1440,10080"))
+
+    fun setNotifLeadDefaults(set: Set<Int>) {
+        prefs.edit().putString("notif_leads_defaults", com.example.data.notifications.NotificationLeads.toCsv(set)).apply()
+    }
+
+    /** Registro de códigos de alarma actualmente programados (para cancelar las que quedan viejas). */
+    fun getScheduledAlarmCodes(): Set<Int> =
+        prefs.getString("scheduled_alarm_codes", "")?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.toSet() ?: emptySet()
+
+    fun setScheduledAlarmCodes(codes: Set<Int>) {
+        prefs.edit().putString("scheduled_alarm_codes", codes.joinToString(",")).apply()
+    }
+
     fun setAdvanceNoticeMinutes(minutes: Int) {
         prefs.edit().putInt("advance_notice_min", minutes).apply()
     }

@@ -918,7 +918,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         taskType: String = TaskTypes.TAREA,
         confidence: String = ConfidenceLevels.ALTA,
         hasTime: Boolean = true,
-        recurrenceType: String = RecurrenceHelper.NONE
+        recurrenceType: String = RecurrenceHelper.NONE,
+        notifLeadsCsv: String = ""
     ) {
         viewModelScope.launch {
             val safeType = if (TaskTypes.isValid(taskType)) taskType else TaskTypes.TAREA
@@ -935,7 +936,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 hasTime = hasTime,
                 originReference = originRef,
                 recurrenceType = safeRec,
-                recurrenceAnchor = RecurrenceHelper.anchorFor(safeRec, dueTimestamp)
+                recurrenceAnchor = RecurrenceHelper.anchorFor(safeRec, dueTimestamp),
+                notifLeadsCsv = notifLeadsCsv
             )
             val id = db.taskDao().insertTask(task)
             rescheduleAlarms()
@@ -974,7 +976,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         newDueTimestamp: Long,
         newJobTag: String,
         newHasTime: Boolean = true,
-        newRecurrenceType: String = task.recurrenceType
+        newRecurrenceType: String = task.recurrenceType,
+        newNotifLeadsCsv: String = task.notifLeadsCsv
     ) {
         viewModelScope.launch {
             val safeRec = if (RecurrenceHelper.isValid(newRecurrenceType)) newRecurrenceType else RecurrenceHelper.NONE
@@ -987,7 +990,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 jobTag = newJobTag,
                 hasTime = newHasTime,
                 recurrenceType = safeRec,
-                recurrenceAnchor = RecurrenceHelper.anchorFor(safeRec, newDueTimestamp)
+                recurrenceAnchor = RecurrenceHelper.anchorFor(safeRec, newDueTimestamp),
+                notifLeadsCsv = newNotifLeadsCsv
             )
             db.taskDao().updateTask(updated)
             rescheduleAlarms()
@@ -1424,7 +1428,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     recurrenceType = item.recurrenceType,
                     recurrenceAnchor = item.recurrenceAnchor.ifBlank {
                         RecurrenceHelper.anchorFor(item.recurrenceType, item.dueTimestamp)
-                    }
+                    },
+                    notifLeadsCsv = item.notifLeadsCsv
                 )
             )
             rescheduleAlarms()
@@ -1460,6 +1465,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             db.meetingItemDao().updateItem(
                 item.copy(dueTimestamp = dueTimestamp.coerceAtLeast(0L), hasTime = hasTime)
             )
+        }
+    }
+
+    /** Define las anticipaciones de notificación propias de un ítem de junta (CSV del catálogo). */
+    fun setMeetingItemNotifLeads(item: MeetingTaskItem, notifLeadsCsv: String) {
+        viewModelScope.launch {
+            db.meetingItemDao().updateItem(item.copy(notifLeadsCsv = notifLeadsCsv))
         }
     }
 

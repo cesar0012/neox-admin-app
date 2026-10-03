@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -67,7 +68,7 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 
-private val SETTINGS_TABS = listOf("Rotador", "Wi-Fi PC", "Notif.", "Respaldo")
+private val SETTINGS_TABS = listOf("Rotador", "Wi-Fi PC", "Notif.", "Backup")
 
 /**
  * Sección unificada de Configuración: Rotador de modelos, puente Wi-Fi con la PC
@@ -132,15 +133,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
 @Composable
 private fun NotificationsSection(viewModel: MainViewModel) {
     val context = LocalContext.current
-    var leadMinutes by remember { mutableIntStateOf(viewModel.prefs.getAdvanceNoticeMinutes()) }
-
-    val options = listOf(
-        0 to "A la hora exacta",
-        15 to "15 min antes",
-        30 to "30 min antes",
-        60 to "1 hora antes",
-        1440 to "1 día antes"
-    )
+    var leads by remember { mutableStateOf(viewModel.prefs.getNotifLeadDefaults()) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -192,38 +185,26 @@ private fun NotificationsSection(viewModel: MainViewModel) {
                 border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate700))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Anticipación de los avisos", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("Cuándo avisar (puedes elegir varios)", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("Cuánto antes de la hora de cada tarea/alarma debe sonar el aviso.", color = Slate400, fontSize = 11.sp)
+                    Text(
+                        "Estas anticipaciones se aplican por omisión a cada tarea nueva. " +
+                            "Personaliza las de una tarea específica desde la Agenda (campanita) o en los ítems de una junta. " +
+                            "Si no eliges ninguna, el aviso llega a la hora exacta.",
+                        color = Slate400,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        options.forEach { (mins, label) ->
-                            val isSelected = leadMinutes == mins
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(if (isSelected) CyanNeon else Slate800)
-                                    .border(1.dp, if (isSelected) CyanNeon else Slate700, RoundedCornerShape(14.dp))
-                                    .clickable {
-                                        leadMinutes = mins
-                                        viewModel.prefs.setAdvanceNoticeMinutes(mins)
-                                        com.example.data.notifications.AlarmScheduler.scheduleNext(context)
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp)
-                            ) {
-                                Text(
-                                    label,
-                                    color = if (isSelected) OnCyan else Slate400,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            }
+                    NotifLeadsEditor(
+                        selected = leads,
+                        onSelectionChange = { newLeads ->
+                            leads = newLeads
+                            viewModel.prefs.setNotifLeadDefaults(newLeads)
+                            com.example.data.notifications.AlarmScheduler.scheduleNext(context)
                         }
-                    }
+                    )
                 }
             }
         }

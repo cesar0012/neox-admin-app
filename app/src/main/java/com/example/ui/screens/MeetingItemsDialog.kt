@@ -72,6 +72,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.MeetingNote
 import com.example.data.model.MeetingTaskItem
 import com.example.data.model.TaskTypes
+import com.example.data.notifications.NotificationLeads
 import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
@@ -108,7 +109,9 @@ fun MeetingItemsDialog(
     onDiscard: (MeetingTaskItem) -> Unit,
     onSetSchedule: (MeetingTaskItem, Long, Boolean) -> Unit,
     onRename: (MeetingTaskItem, String) -> Unit,
-    onSetOwner: (MeetingTaskItem, String) -> Unit
+    onSetOwner: (MeetingTaskItem, String) -> Unit,
+    defaultNotifLeads: Set<Int> = emptySet(),
+    onSetLeads: (MeetingTaskItem, String) -> Unit
 ) {
     val pending = items.filter { it.status == "PENDIENTE" }
     val added = items.filter { it.status == "AGREGADA" }
@@ -208,7 +211,9 @@ fun MeetingItemsDialog(
                             onDiscard = onDiscard,
                             onSetSchedule = onSetSchedule,
                             onRename = onRename,
-                            onSetOwner = onSetOwner
+                            onSetOwner = onSetOwner,
+                            defaultNotifLeads = defaultNotifLeads,
+                            onSetLeads = onSetLeads
                         )
                     }
 
@@ -252,7 +257,9 @@ private fun MeetingItemRow(
     onDiscard: (MeetingTaskItem) -> Unit,
     onSetSchedule: (MeetingTaskItem, Long, Boolean) -> Unit,
     onRename: (MeetingTaskItem, String) -> Unit,
-    onSetOwner: (MeetingTaskItem, String) -> Unit
+    onSetOwner: (MeetingTaskItem, String) -> Unit,
+    defaultNotifLeads: Set<Int>,
+    onSetLeads: (MeetingTaskItem, String) -> Unit
 ) {
     val isAdded = item.status == "AGREGADA"
     val sinFecha = item.dueTimestamp <= 0L
@@ -260,7 +267,11 @@ private fun MeetingItemRow(
 
     var editingSchedule by remember(item.id) { mutableStateOf(false) }
     var editingTitle by remember(item.id) { mutableStateOf(false) }
+    var editingNotif by remember(item.id) { mutableStateOf(false) }
     var titleText by remember(item.id, item.title) { mutableStateOf(item.title) }
+    val itemLeads by remember(item.id, item.notifLeadsCsv) {
+        mutableStateOf(NotificationLeads.effectiveFor(item.notifLeadsCsv, defaultNotifLeads))
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -336,6 +347,45 @@ private fun MeetingItemRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            // ── Notificaciones del ítem (cuándo avisar) ──
+            if (!isAdded) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(if (editingNotif) CyanNeon.copy(alpha = 0.15f) else Slate800)
+                            .border(1.dp, if (editingNotif) CyanNeon else Slate700, RoundedCornerShape(9.dp))
+                            .clickable { editingNotif = !editingNotif }
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Notifications,
+                            contentDescription = "Cuándo notificar",
+                            tint = if (item.notifLeadsCsv.isBlank()) Slate400 else CyanNeon,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Text(
+                            if (item.notifLeadsCsv.isBlank()) "Avisar: omisión (${NotificationLeads.summary(itemLeads)})"
+                            else "Avisar: ${NotificationLeads.summary(itemLeads)}",
+                            color = if (item.notifLeadsCsv.isBlank()) Slate400 else CyanNeon,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                }
+                if (editingNotif) {
+                    NotifLeadsEditor(
+                        selected = itemLeads,
+                        onSelectionChange = { newLeads ->
+                            onSetLeads(item, NotificationLeads.toCsv(newLeads))
+                        }
+                    )
+                }
             }
 
             // ── Dueño del compromiso (atribución del agente, corregible con un toque) ──

@@ -37,8 +37,8 @@ import kotlinx.coroutines.launch
 object AlarmScheduler {
 
     private const val TAG = "AlarmScheduler"
-    private const val REQUEST_CODE = 41001
     const val EXTRA_TASK_ID = "task_id"
+    const val EXTRA_LEAD = "lead_minutes"
 
     const val ALARM_CHANNEL_ID = "omniwork_alarmas_channel"
 
@@ -68,47 +68,74 @@ object AlarmScheduler {
         ReminderNotificationHelper.initNotificationChannel(context)
     }
 
-    /** Fija (o re-fija) la alarma para la tarea más próxima. Barato: se puede llamar seguido. */
+    /**
+     * Programa TODAS las alarmas futuras: por cada tarea, una alarma por cada anticipación
+     * efectiva (las propias de la tarea o, si no tiene, las omisión de Config). Barato y
+     * idempotente: se puede llamar seguido; las alarmas que ya no aplican se cancelan
+     * usando el registro persistente de códigos.
+     */
     fun scheduleNext(context: Context) {
         initChannels(context)
         val appContext = context.applicationContext
         CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
             try {
+                val prefs = AppPreferences(appContext)
                 val tasks = AppDatabase.getInstance(appContext).taskDao().getAllTasksSync()
                     .filter { !it.isCompleted && it.dueTimestamp > 0L }
                 val am = appContext.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return@launch
+                val defaults = prefs.getNotifLeadDefaults()
 
-                val pending = PendingIntent.getBroadcast(
-                    appContext,
-                    REQUEST_CODE,
-                    Intent(appContext, TaskAlarmReceiver::class.java),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-
-                if (tasks.isEmpty()) {
-                    am.cancel(pending)
-                    return@launch
+                val now = System.currentTimeMillis()
+                // code -> (triggerAt, taskId, lead): solo disparos futuros
+                val desired = HashMap<Int, Triple<Long, Long, Int>>()
+                tasks.forEach { task ->
+                    NotificationLeads.effectiveFor(task.notifLeadsCsv, defaults).forEach { lead ->
+                        val triggerAt = task.dueTimestamp - lead * 60_000L
+                        if (triggerAt > now + 5_000L) {
+                            desired[NotificationLeads.requestCode(task.id, lead)] = Triple(triggerAt, task.id, lead)
+                        }
+                    }
                 }
 
-                val leadMinutes = AppPreferences(appContext).getAdvanceNoticeMinutes().toLong()
-                val now = System.currentTimeMillis()
-                val earliest = tasks.minOf { it.dueTimestamp }
-                val triggerAt = (earliest - leadMinutes * 60_000L).coerceAtLeast(now + 5_000L)
+                // Cancelar alarmas registradas que ya no aplican (tarea borrada/completada/editada)
+                prefs.getScheduledAlarmCodes().forEach { code ->
+                    if (code !in desired) {
+                        am.cancel(
+                            PendingIntent.getBroadcast(
+                                appContext, code,
+                                Intent(appContext, TaskAlarmReceiver::class.java),
+                                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                            )
+                        )
+                    }
+                }
 
                 val canExact = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     am.canScheduleExactAlarms()
                 } else true
 
-                try {
-                    if (canExact) {
-                        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-                    } else {
+                desired.forEach { (code, spec) ->
+                    val (triggerAt, taskId, lead) = spec
+                    val intent = Intent(appContext, TaskAlarmReceiver::class.java).apply {
+                        putExtra(EXTRA_TASK_ID, taskId)
+                        putExtra(EXTRA_LEAD, lead)
+                    }
+                    val pending = PendingIntent.getBroadcast(
+                        appContext, code, intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    try {
+                        if (canExact) {
+                            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+                        } else {
+                            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+                        }
+                    } catch (se: SecurityException) {
                         am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
                     }
-                } catch (se: SecurityException) {
-                    am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
                 }
-                Log.d(TAG, "Próxima alarma para ${java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault()).format(java.util.Date(triggerAt))}")
+                prefs.setScheduledAlarmCodes(desired.keys)
+                Log.d(TAG, "Alarmas programadas: ${desired.size}")
             } catch (t: Throwable) {
                 Log.e(TAG, "scheduleNext error: ${t.message}", t)
             }
@@ -132,8 +159,6 @@ class TaskAlarmReceiver : BroadcastReceiver() {
                 val dao = AppDatabase.getInstance(appContext).taskDao()
                 val taskId = intent.getLongExtra(AlarmScheduler.EXTRA_TASK_ID, -1L)
                 val task = dao.getAllTasksSync().firstOrNull { it.id == taskId }
-                    ?: dao.getAllTasksSync().filter { !it.isCompleted && it.dueTimestamp > 0L }
-                        .minByOrNull { it.dueTimestamp }
 
                 if (task != null && !task.isCompleted && task.dueTimestamp > 0L) {
                     fireNotification(appContext, task)

@@ -35,6 +35,9 @@ data class WorkTask(
     // Ancla de la recurrencia: día de semana (LUNES..DOMINGO) para SEMANAL,
     // día del mes (1-31) para MENSUAL o "dd/mm" para ANUAL
     @ColumnInfo(defaultValue = "") val recurrenceAnchor: String = "",
+    // Anticipaciones de notificación propias (CSV de minutos, catálogo NotificationLeads).
+    // Vacío = heredar las omisión globales de Config.
+    @ColumnInfo(defaultValue = "") val notifLeadsCsv: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -76,6 +79,7 @@ data class MeetingTaskItem(
     // Atribución de dueño: YO (compromiso del propietario), OTRO (de otro participante),
     // INDEFINIDO (ambiguo: el usuario lo define en el pop-up de revisión)
     @ColumnInfo(defaultValue = "INDEFINIDO") val owner: String = "INDEFINIDO",
+    @ColumnInfo(defaultValue = "") val notifLeadsCsv: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 

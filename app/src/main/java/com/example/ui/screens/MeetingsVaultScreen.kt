@@ -579,7 +579,9 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
             onDiscard = { viewModel.discardMeetingItem(it) },
             onSetSchedule = { item, due, hasTime -> viewModel.updateMeetingItemSchedule(item, due, hasTime) },
             onRename = { item, title -> viewModel.renameMeetingItem(item, title) },
-            onSetOwner = { item, owner -> viewModel.setMeetingItemOwner(item, owner) }
+            onSetOwner = { item, owner -> viewModel.setMeetingItemOwner(item, owner) },
+            defaultNotifLeads = viewModel.prefs.getNotifLeadDefaults(),
+            onSetLeads = { item, csv -> viewModel.setMeetingItemNotifLeads(item, csv) }
         )
     }
 
