@@ -73,6 +73,9 @@ data class MeetingTaskItem(
     val status: String = "PENDIENTE", // PENDIENTE / AGREGADA / DESCARTADA
     @ColumnInfo(defaultValue = "NINGUNA") val recurrenceType: String = "NINGUNA",
     @ColumnInfo(defaultValue = "") val recurrenceAnchor: String = "",
+    // Atribución de dueño: YO (compromiso del propietario), OTRO (de otro participante),
+    // INDEFINIDO (ambiguo: el usuario lo define en el pop-up de revisión)
+    @ColumnInfo(defaultValue = "INDEFINIDO") val owner: String = "INDEFINIDO",
     val createdAt: Long = System.currentTimeMillis()
 )
 

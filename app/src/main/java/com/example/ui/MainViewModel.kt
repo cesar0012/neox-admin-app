@@ -1259,11 +1259,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (transcript.isBlank()) return emptyList()
         val systemPrompt = """
             Eres un SUB-AGENTE EXTRACTOR de compromisos de la transcripción de una junta de trabajo.
-            Detecta TODOS los compromisos, pendientes, juntas futuras, llamadas y entregas que quedaron
-            ASIGNADOS AL PROPIETARIO de esta app (quien graba la junta y usualmente la conduce):
-            - Dichos en primera persona ("voy a...", "me encargo de...", "yo se lo mando...") o
-              asignados directamente a él por otro participante.
-            - NO incluyas compromisos de otros participantes: esos se registran aparte en la minuta.
+            Detecta TODOS los compromisos, pendientes, juntas futuras, llamadas y entregas de TODOS
+            los participantes, y atribuye cada uno con el campo DUEÑO:
+            - DUEÑO: YO — cuando el compromiso es del PROPIETARIO de esta app (quien graba la junta):
+              dicho en primera persona ("voy a...", "me encargo de...", "yo se lo mando...", "me toca...")
+              o asignado directamente a él por otro participante.
+            - DUEÑO: OTRO — cuando el compromiso es claramente de otro participante nombrado
+              ("María va a enviar el reporte", "el equipo de diseño lo entrega el viernes").
+            - DUEÑO: INDEFINIDO — cuando no queda claro de quién es ("hay que enviar los templates",
+              "se tiene que revisar el contrato"): sin sujeto claro ni nombre.
 
             POR CADA compromiso, aplica las reglas del asistente ejecutivo:
             - TITULO: corto (máx 8 palabras), técnico y orientado a la acción. NUNCA frases literales
@@ -1291,6 +1295,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             FECHA: mañana
             HORA: 10:00
             CONFIANZA: ALTA
+            DUEÑO: YO
             RECURRENCIA: ninguna
             CITA: Necesitamos agendar una junta para el día de mañana a las 10 de la mañana para revisar los templates.
         """.trimIndent()
@@ -1337,6 +1342,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val recurrencia = RecurrenceHelper.normalize(recRaw).ifEmpty {
                 RecurrenceHelper.detectFromText(cita.ifBlank { fechaRaw })
             }
+            val duenoRaw = field(block, "DUEÑO:", "DUENO:", "DUEÑO", "DUENO")
+                .uppercase(Locale.getDefault())
+            var owner = when {
+                "OTRO" in duenoRaw || "OTRA" in duenoRaw -> "OTRO"
+                duenoRaw.contains("YO") || duenoRaw.contains("MIO") || duenoRaw.contains("MÍA") -> "YO"
+                else -> "INDEFINIDO"
+            }
+            // Red de seguridad lingüística: compromiso en primera persona en la cita = YO
+            if (owner == "INDEFINIDO" && cita.isNotBlank() && Regex(
+                "(?i)\\b(voy a|me encargo|me encargar\\w*|me toca|yo (lo|la|los|las|se|reviso|envio|hago|mando)|lo hago yo|por mi parte|se los mando|te lo mando|te la mando|me comprometo)\\b"
+            ).containsMatchIn(cita)) {
+                owner = "YO"
+            }
 
             // Resolución con los mismos lineamientos del asistente + red de seguridad
             // determinista sobre la cita textual (rescata fecha/hora si el modelo falló)
@@ -1372,7 +1390,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     confidence = if (ConfidenceLevels.isValid(confRaw)) confRaw else ConfidenceLevels.MEDIA,
                     status = "PENDIENTE",
                     recurrenceType = recurrencia,
-                    recurrenceAnchor = RecurrenceHelper.anchorFor(recurrencia, due)
+                    recurrenceAnchor = RecurrenceHelper.anchorFor(recurrencia, due),
+                    owner = owner
                 )
             )
         }
@@ -1442,6 +1461,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 item.copy(dueTimestamp = dueTimestamp.coerceAtLeast(0L), hasTime = hasTime)
             )
         }
+    }
+
+    /** Asigna el dueño de un ítem detectado ("YO" mío / "OTRO" de otro participante). */
+    fun setMeetingItemOwner(item: MeetingTaskItem, owner: String) {
+        val o = if (owner in listOf("YO", "OTRO")) owner else "INDEFINIDO"
+        viewModelScope.launch { db.meetingItemDao().updateItem(item.copy(owner = o)) }
     }
 
     /** Edita el título de una detección (datos base corregibles por el usuario). */
@@ -2356,6 +2381,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     .put("priority", mi.priority).put("dueTimestamp", mi.dueTimestamp)
                     .put("hasTime", mi.hasTime).put("confidence", mi.confidence)
                     .put("status", mi.status).put("createdAt", mi.createdAt)
+                    .put("owner", mi.owner)
             }))
 
             val cfg = rotator.config

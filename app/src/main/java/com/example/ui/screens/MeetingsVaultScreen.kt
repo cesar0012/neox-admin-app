@@ -578,7 +578,8 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
             onAdd = { viewModel.addMeetingItemToTasks(it) },
             onDiscard = { viewModel.discardMeetingItem(it) },
             onSetSchedule = { item, due, hasTime -> viewModel.updateMeetingItemSchedule(item, due, hasTime) },
-            onRename = { item, title -> viewModel.renameMeetingItem(item, title) }
+            onRename = { item, title -> viewModel.renameMeetingItem(item, title) },
+            onSetOwner = { item, owner -> viewModel.setMeetingItemOwner(item, owner) }
         )
     }
 

@@ -107,11 +107,14 @@ fun MeetingItemsDialog(
     onAdd: (MeetingTaskItem) -> Unit,
     onDiscard: (MeetingTaskItem) -> Unit,
     onSetSchedule: (MeetingTaskItem, Long, Boolean) -> Unit,
-    onRename: (MeetingTaskItem, String) -> Unit
+    onRename: (MeetingTaskItem, String) -> Unit,
+    onSetOwner: (MeetingTaskItem, String) -> Unit
 ) {
     val pending = items.filter { it.status == "PENDIENTE" }
     val added = items.filter { it.status == "AGREGADA" }
-    val pendingWithDate = pending.filter { it.dueTimestamp > 0 }
+    val indefinidos = pending.count { it.owner == "INDEFINIDO" }
+    // En lote solo se agregan las marcadas mías y con fecha
+    val pendingWithDate = pending.filter { it.owner == "YO" && it.dueTimestamp > 0 }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Card(
@@ -175,6 +178,7 @@ fun MeetingItemsDialog(
                     StatChip("${items.size} detectados", CyanNeon)
                     StatChip("${pending.size} pendientes", if (pending.isEmpty()) Slate400 else AmberWarning)
                     StatChip("${added.size} agregadas", EmeraldSuccess)
+                    if (indefinidos > 0) StatChip("$indefinidos sin dueño", RoseError)
                 }
 
                 // ───────── Lista de ítems ─────────
@@ -203,7 +207,8 @@ fun MeetingItemsDialog(
                             onAdd = onAdd,
                             onDiscard = onDiscard,
                             onSetSchedule = onSetSchedule,
-                            onRename = onRename
+                            onRename = onRename,
+                            onSetOwner = onSetOwner
                         )
                     }
 
@@ -215,7 +220,7 @@ fun MeetingItemsDialog(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth().height(42.dp)
                             ) {
-                                Text("Agregar todas las que ya tienen fecha (${pendingWithDate.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Agregar mis tareas con fecha (${pendingWithDate.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                         }
@@ -246,10 +251,12 @@ private fun MeetingItemRow(
     onAdd: (MeetingTaskItem) -> Unit,
     onDiscard: (MeetingTaskItem) -> Unit,
     onSetSchedule: (MeetingTaskItem, Long, Boolean) -> Unit,
-    onRename: (MeetingTaskItem, String) -> Unit
+    onRename: (MeetingTaskItem, String) -> Unit,
+    onSetOwner: (MeetingTaskItem, String) -> Unit
 ) {
     val isAdded = item.status == "AGREGADA"
     val sinFecha = item.dueTimestamp <= 0L
+    val esMia = item.owner == "YO"
 
     var editingSchedule by remember(item.id) { mutableStateOf(false) }
     var editingTitle by remember(item.id) { mutableStateOf(false) }
@@ -329,6 +336,27 @@ private fun MeetingItemRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            // ── Dueño del compromiso (atribución del agente, corregible con un toque) ──
+            if (!isAdded) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OwnerChip(
+                        label = "Mía",
+                        selected = esMia,
+                        color = CyanNeon,
+                        onClick = { onSetOwner(item, "YO") }
+                    )
+                    OwnerChip(
+                        label = "De otro",
+                        selected = item.owner == "OTRO",
+                        color = VioletAccent,
+                        onClick = { onSetOwner(item, "OTRO") }
+                    )
+                    if (item.owner == "INDEFINIDO") {
+                        Text("¿de quién es?", color = AmberWarning, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
 
             // ── Fecha/hora: renglón propio y botón Cambiar SIEMPRE visible ──
@@ -431,9 +459,16 @@ private fun MeetingItemRow(
             // ── Acciones ──
             if (!isAdded) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val canAdd = esMia && item.dueTimestamp > 0L
+                    val addLabel = when {
+                        item.owner == "OTRO" -> "Es de otro participante"
+                        item.dueTimestamp <= 0L -> "Falta definir fecha"
+                        item.owner == "INDEFINIDO" -> "Marca si es tuya"
+                        else -> "Agregar a mis tareas"
+                    }
                     Button(
                         onClick = { onAdd(item) },
-                        enabled = item.dueTimestamp > 0L,
+                        enabled = canAdd,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = CyanNeon,
                             contentColor = OnCyan,
@@ -449,7 +484,7 @@ private fun MeetingItemRow(
                         Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(13.dp))
                         Spacer(modifier = Modifier.width(5.dp))
                         Text(
-                            if (item.dueTimestamp > 0L) "Agregar a mis tareas" else "Falta definir fecha",
+                            addLabel,
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -589,6 +624,34 @@ private fun MeetingScheduleEditor(
             dismissButton = {
                 TextButton(onClick = { showTimePicker = false }) { Text("Cancelar", color = Slate400) }
             }
+        )
+    }
+}
+
+@Composable
+private fun OwnerChip(label: String, selected: Boolean, color: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (selected) color.copy(alpha = 0.22f) else Slate800)
+            .border(
+                1.dp,
+                if (selected) color else Slate700,
+                RoundedCornerShape(9.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        if (selected) {
+            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = color, modifier = Modifier.size(10.dp))
+        }
+        Text(
+            label,
+            color = if (selected) color else Slate400,
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.Bold
         )
     }
 }
