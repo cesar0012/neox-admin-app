@@ -1907,6 +1907,7 @@ fun TaskCard(
     val noDate = task.dueTimestamp <= 0L
 
     var showStatusDropdown by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val now = System.currentTimeMillis()
     val isOverdue = !noDate && task.dueTimestamp < now && !task.isCompleted
@@ -2154,12 +2155,53 @@ fun TaskCard(
                     IconButton(onClick = onEdit, modifier = Modifier.size(26.dp)) {
                         Icon(Icons.Default.Edit, contentDescription = "Editar tarea", tint = Slate400, modifier = Modifier.size(14.dp))
                     }
-                    IconButton(onClick = onDelete, modifier = Modifier.size(26.dp)) {
+                    IconButton(onClick = { showDeleteConfirm = true }, modifier = Modifier.size(26.dp)) {
                         Icon(Icons.Default.Delete, contentDescription = "Eliminar tarea", tint = Slate700, modifier = Modifier.size(14.dp))
                     }
                 }
             }
         }
+    }
+
+    // Advertencia antes de eliminar: nada se borra con un click accidental
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            containerColor = Slate900,
+            icon = {
+                Icon(Icons.Default.Delete, contentDescription = null, tint = RoseError, modifier = Modifier.size(28.dp))
+            },
+            title = {
+                Text("¿Eliminar esta tarea?", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    "Se eliminará «${task.title}» de tu agenda y de la memoria RAG.\nEsta acción no se puede deshacer.",
+                    color = Slate400,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDelete()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseError, contentColor = TextPrimary),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text("Sí, eliminar", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancelar", color = Slate400, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
     }
 }
 
