@@ -56,6 +56,11 @@ import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ViewKanban
 import androidx.compose.material.icons.filled.ViewList
@@ -348,6 +353,7 @@ fun AgendaScreen(viewModel: MainViewModel) {
 // 1. LIST VIEW & ADVANCED FILTERS
 // -----------------------------------------------------------------------------------------
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AgendaListView(
     context: android.content.Context,
@@ -377,6 +383,10 @@ fun AgendaListView(
             compareBy({ it.isCompleted || it.status == "TERMINADO" }, { it.dueTimestamp <= 0 }, { it.dueTimestamp })
         )
     }
+
+    // Modo de agrupación de la lista (hoisted: sobrevive el scroll del LazyColumn)
+    var groupMode by remember { mutableStateOf(AgendaGroupMode.TYPE) }
+    val grouped = remember(sortedTasks, groupMode) { buildTaskGroups(sortedTasks, groupMode) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -506,10 +516,8 @@ fun AgendaListView(
             }
         }
 
-        // Compact & Collapsible Filters Section
+        // ── Filtros clave SIEMPRE visibles: Estado + Proyecto ──
         item {
-            var isFiltersExpanded by remember { mutableStateOf(false) }
-
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -517,10 +525,62 @@ fun AgendaListView(
                 border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate800))
             ) {
                 Column(modifier = Modifier.padding(10.dp)) {
+                    Text("Estado:", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    ) {
+                        StatusFilterType.values().forEach { sf ->
+                            FilterChip(
+                                label = sf.label,
+                                isSelected = selectedStatusFilter == sf,
+                                onClick = { onSelectStatusFilter(sf) }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text("Proyecto / Trabajo:", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+                        item {
+                            FilterChip(
+                                label = "Todos",
+                                isSelected = selectedJobFilter == "Todos",
+                                onClick = { onSelectJobFilter("Todos") }
+                            )
+                        }
+                        items(jobs) { jobName ->
+                            FilterChip(
+                                label = jobName,
+                                isSelected = selectedJobFilter == jobName,
+                                onClick = { onSelectJobFilter(jobName) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Filtros avanzados (plegable): Plazo / Fecha ──
+        item {
+            var isAdvancedExpanded by remember { mutableStateOf(false) }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(
+                        if (isAdvancedExpanded || selectedDateFilter != DateFilterType.ALL) CyanNeon.copy(alpha = 0.4f) else Slate800
+                    )
+                )
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { isFiltersExpanded = !isFiltersExpanded },
+                            .clickable { isAdvancedExpanded = !isAdvancedExpanded },
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -529,101 +589,40 @@ fun AgendaListView(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.FilterList, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp))
-                            Text("Filtros", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-
-                            // Compact summary pills when collapsed
-                            if (!isFiltersExpanded) {
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(start = 4.dp)
+                            Icon(Icons.Default.Tune, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(15.dp))
+                            Text("Avanzado", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            if (!isAdvancedExpanded && selectedDateFilter != DateFilterType.ALL) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(CyanNeon.copy(alpha = 0.2f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
-                                    item {
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(if (selectedDateFilter != DateFilterType.ALL) CyanNeon.copy(alpha = 0.2f) else Slate800)
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(selectedDateFilter.label, color = if (selectedDateFilter != DateFilterType.ALL) CyanNeon else Slate400, fontSize = 10.sp)
-                                        }
-                                    }
-                                    item {
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(if (selectedStatusFilter != StatusFilterType.ALL) AmberWarning.copy(alpha = 0.2f) else Slate800)
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(selectedStatusFilter.label, color = if (selectedStatusFilter != StatusFilterType.ALL) AmberWarning else Slate400, fontSize = 10.sp)
-                                        }
-                                    }
-                                    if (selectedJobFilter != "Todos") {
-                                        item {
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(4.dp))
-                                                    .background(VioletAccent.copy(alpha = 0.2f))
-                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                                            ) {
-                                                Text(selectedJobFilter, color = VioletAccent, fontSize = 10.sp)
-                                            }
-                                        }
-                                    }
+                                    Text(selectedDateFilter.label, color = CyanNeon, fontSize = 10.sp)
                                 }
                             }
                         }
-
                         Icon(
-                            imageVector = if (isFiltersExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = if (isFiltersExpanded) "Ocultar filtros" else "Mostrar filtros",
+                            imageVector = if (isAdvancedExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
                             tint = CyanNeon,
                             modifier = Modifier.size(18.dp)
                         )
                     }
 
-                    if (isFiltersExpanded) {
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Filter by Time / Date Range
+                    if (isAdvancedExpanded) {
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text("Plazo / Fecha:", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp)) {
-                            items(DateFilterType.values()) { df ->
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            DateFilterType.values().forEach { df ->
                                 FilterChip(
                                     label = df.label,
                                     isSelected = selectedDateFilter == df,
                                     onClick = { onSelectDateFilter(df) }
-                                )
-                            }
-                        }
-
-                        // Filter by Status
-                        Text("Estado:", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp)) {
-                            items(StatusFilterType.values()) { sf ->
-                                FilterChip(
-                                    label = sf.label,
-                                    isSelected = selectedStatusFilter == sf,
-                                    onClick = { onSelectStatusFilter(sf) }
-                                )
-                            }
-                        }
-
-                        // Filter by Project
-                        Text("Proyecto / Trabajo:", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp)) {
-                            item {
-                                FilterChip(
-                                    label = "Todos",
-                                    isSelected = selectedJobFilter == "Todos",
-                                    onClick = { onSelectJobFilter("Todos") }
-                                )
-                            }
-                            items(jobs) { jobName ->
-                                FilterChip(
-                                    label = jobName,
-                                    isSelected = selectedJobFilter == jobName,
-                                    onClick = { onSelectJobFilter(jobName) }
                                 )
                             }
                         }
@@ -632,7 +631,11 @@ fun AgendaListView(
             }
         }
 
-        // Task count indicator
+        // ── Agrupación de la lista ──
+        item {
+            AgendaGroupSelector(groupMode) { groupMode = it }
+        }
+
         item {
             Text(
                 text = "Tareas (${tasks.size})",
@@ -654,15 +657,122 @@ fun AgendaListView(
                 }
             }
         } else {
-            items(sortedTasks, key = { it.id }) { task ->
-                TaskCard(
-                    task = task,
-                    onToggle = { onToggleCompletion(task) },
-                    onUpdateStatus = { newStatus -> onUpdateStatus(task, newStatus) },
-                    onDelete = { onDeleteTask(task) },
-                    onEdit = { onEditTask(task) }
+            grouped.forEach { (header, headerTasks) ->
+                item(key = "group_header_" + header.first) {
+                    GroupHeader(title = header.first, icon = header.second, count = headerTasks.size)
+                }
+                items(headerTasks, key = { it.id }) { task ->
+                    TaskCard(
+                        task = task,
+                        onToggle = { onToggleCompletion(task) },
+                        onUpdateStatus = { newStatus -> onUpdateStatus(task, newStatus) },
+                        onDelete = { onDeleteTask(task) },
+                        onEdit = { onEditTask(task) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Modos de agrupación de la lista de agenda (siempre agrupada). */
+private enum class AgendaGroupMode(val label: String) {
+    TYPE("Todas"),
+    PROJECT("Proyectos"),
+    DATE("Fechas")
+}
+
+@Composable
+private fun AgendaGroupSelector(selected: AgendaGroupMode, onSelect: (AgendaGroupMode) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Slate900)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        AgendaGroupMode.values().forEach { mode ->
+            val isSelected = selected == mode
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(if (isSelected) CyanNeon else Color.Transparent)
+                    .clickable { onSelect(mode) }
+                    .padding(vertical = 7.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    mode.label,
+                    color = if (isSelected) OnCyan else Slate400,
+                    fontSize = 11.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1
                 )
             }
+        }
+    }
+}
+
+private fun buildTaskGroups(
+    sortedTasks: List<WorkTask>,
+    mode: AgendaGroupMode
+): List<Pair<Pair<String, ImageVector>, List<WorkTask>>> {
+    val now = System.currentTimeMillis()
+    val oneDayMs = 24 * 3600 * 1000L
+    val today = getStartOfDay(now)
+
+    return when (mode) {
+        AgendaGroupMode.TYPE -> TaskTypes.ALL.mapNotNull { type ->
+            val list = sortedTasks.filter { it.taskType == type }
+            if (list.isEmpty()) null
+            else Pair(Pair(TaskTypes.labelOf(type) + "s", typeVisualOf(type).icon), list)
+        }
+        AgendaGroupMode.PROJECT -> sortedTasks.groupBy { it.jobTag }
+            .toSortedMap()
+            .map { (job, list) -> Pair(Pair(job, Icons.Default.Folder), list) }
+        AgendaGroupMode.DATE -> {
+            val buckets = linkedMapOf(
+                "Vencidas" to (sortedTasks.filter { it.dueTimestamp in 1..now && !it.isCompleted }),
+                "Hoy" to (sortedTasks.filter { it.dueTimestamp in today..(today + oneDayMs) }),
+                "Mañana" to (sortedTasks.filter { it.dueTimestamp in (today + oneDayMs)..(today + 2 * oneDayMs) }),
+                "Esta semana" to (sortedTasks.filter { it.dueTimestamp > (today + 2 * oneDayMs) && it.dueTimestamp <= (today + 7 * oneDayMs) }),
+                "Más adelante" to (sortedTasks.filter { it.dueTimestamp > (today + 7 * oneDayMs) }),
+                "Sin fecha" to (sortedTasks.filter { it.dueTimestamp <= 0L })
+            )
+            val icons = mapOf(
+                "Vencidas" to Icons.Default.Warning,
+                "Hoy" to Icons.Default.Event,
+                "Mañana" to Icons.Default.Event,
+                "Esta semana" to Icons.Default.DateRange,
+                "Más adelante" to Icons.Default.DateRange,
+                "Sin fecha" to Icons.Default.Schedule
+            )
+            buckets.filterValues { it.isNotEmpty() }
+                .map { (label, list) -> Pair(Pair(label, icons[label] ?: Icons.Default.Event), list) }
+        }
+    }
+}
+
+@Composable
+private fun GroupHeader(title: String, icon: ImageVector, count: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(icon, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(14.dp))
+        Text(title, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(CyanNeon.copy(alpha = 0.15f))
+                .padding(horizontal = 6.dp, vertical = 1.dp)
+        ) {
+            Text("$count", color = CyanNeon, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1848,11 +1958,11 @@ fun TaskCard(
                         imageVector = if (task.isCompleted || task.status == "TERMINADO") Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                         contentDescription = "Completar tarea",
                         tint = if (task.isCompleted || task.status == "TERMINADO") EmeraldSuccess else Slate400,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(2.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
                     // Fila 1: Tipo + estado + prioridad
@@ -1909,12 +2019,12 @@ fun TaskCard(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(5.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
 
                     Text(
                         text = task.title,
                         color = if (task.isCompleted || task.status == "TERMINADO") Slate400 else TextPrimary,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         textDecoration = if (task.isCompleted || task.status == "TERMINADO") TextDecoration.LineThrough else TextDecoration.None
                     )
@@ -1923,12 +2033,12 @@ fun TaskCard(
                         Text(
                             text = task.description,
                             color = Slate400,
-                            fontSize = 11.sp,
-                            maxLines = 2
+                            fontSize = 10.sp,
+                            maxLines = 1
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(5.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
 
                     // Fecha (o falta de fecha) + confianza
                     Row(
@@ -2018,27 +2128,34 @@ fun TaskCard(
                                 }
                             }
                         }
-
-                        ConfidenceIndicator(task.confidence)
                     }
 
-                    if (task.jobTag.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = task.jobTag,
-                            color = CyanNeon.copy(alpha = 0.8f),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                    // Fila inferior: proyecto + confianza (sin estirar la card)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (task.jobTag.isNotBlank()) {
+                            Text(
+                                text = task.jobTag,
+                                color = CyanNeon.copy(alpha = 0.8f),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                        }
+                        ConfidenceIndicator(task.confidence)
                     }
                 }
 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(onClick = onEdit, modifier = Modifier.size(30.dp)) {
-                        Icon(Icons.Default.Edit, contentDescription = "Editar tarea", tint = Slate400, modifier = Modifier.size(16.dp))
+                    IconButton(onClick = onEdit, modifier = Modifier.size(26.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Editar tarea", tint = Slate400, modifier = Modifier.size(14.dp))
                     }
-                    IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
-                        Icon(Icons.Default.Delete, contentDescription = "Eliminar tarea", tint = Slate700, modifier = Modifier.size(16.dp))
+                    IconButton(onClick = onDelete, modifier = Modifier.size(26.dp)) {
+                        Icon(Icons.Default.Delete, contentDescription = "Eliminar tarea", tint = Slate700, modifier = Modifier.size(14.dp))
                     }
                 }
             }
