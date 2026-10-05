@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.omniwork.qxrvmp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 27
-    versionName = "1.10.0"
+    versionCode = 28
+    versionName = "1.11.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

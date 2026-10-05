@@ -185,11 +185,17 @@ class TaskAlarmReceiver : BroadcastReceiver() {
         }
         val isAlarm = task.taskType == TaskTypes.ALARMA
 
+        val hasLink = task.meetingLink.isNotBlank()
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            if (hasLink) {
+                putExtra("nav_meetings", true)
+                putExtra("capture_title", task.title)
+            }
+        }
         val contentIntent = PendingIntent.getActivity(
             context, task.id.toInt(),
-            Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            },
+            openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -209,6 +215,18 @@ class TaskAlarmReceiver : BroadcastReceiver() {
             .setCategory(if (isAlarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
+
+        // Junta en línea: botón directo para capturar la reunión (Meet/Teams/Zoom)
+        if (hasLink) {
+            builder.addAction(
+                0, "🎙️ Capturar junta",
+                PendingIntent.getActivity(
+                    context, (task.id + 80000).toInt(),
+                    openIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            )
+        }
 
         if (isAlarm) {
             builder.setDefaults(NotificationCompat.DEFAULT_ALL)

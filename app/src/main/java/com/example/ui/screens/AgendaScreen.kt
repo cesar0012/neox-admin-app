@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ViewKanban
@@ -2131,10 +2132,10 @@ fun TaskCard(
                         }
                     }
 
-                    // Fila inferior: proyecto + confianza (sin estirar la card)
+                    // Fila inferior: proyecto + link de junta + confianza (sin estirar la card)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (task.jobTag.isNotBlank()) {
@@ -2146,6 +2147,34 @@ fun TaskCard(
                                 maxLines = 1,
                                 modifier = Modifier.weight(1f, fill = false)
                             )
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                        if (task.meetingLink.isNotBlank()) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(VioletAccent.copy(alpha = 0.15f))
+                                    .border(1.dp, VioletAccent.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        runCatching {
+                                            context.startActivity(
+                                                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(task.meetingLink))
+                                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            )
+                                        }
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Videocam,
+                                    contentDescription = "Unirse a la junta en línea",
+                                    tint = VioletAccent,
+                                    modifier = Modifier.size(9.dp)
+                                )
+                                Text("Unirse", color = VioletAccent, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                         ConfidenceIndicator(task.confidence)
                     }

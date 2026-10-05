@@ -168,6 +168,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val isJunta = listOf("junta", "reunion", "reuni\u00f3n", "meeting", "1:1", "sync").any {
                         ev.title.lowercase(java.util.Locale.getDefault()).contains(it)
                     }
+                    // Link de la junta en línea (Meet/Teams/Zoom/Jit) en lugar o descripción
+                    val meetingLink = Regex("https?://[^\\s<>\"']+").findAll(ev.location + " " + ev.description)
+                        .map { it.value.trimEnd('.', ',') }
+                        .firstOrNull { url ->
+                            listOf("meet.google.com", "zoom.us", "teams.microsoft.com", "meet.jit.si").any { url.contains(it) }
+                        }.orEmpty()
                     val id = db.taskDao().insertTask(
                         WorkTask(
                             title = ev.title.take(80),
@@ -178,10 +184,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             jobTag = "General",
                             dueTimestamp = ev.start,
                             priority = "MEDIA",
-                            taskType = if (isJunta) TaskTypes.JUNTA else TaskTypes.EVENTO,
+                            taskType = if (isJunta || meetingLink.isNotBlank()) TaskTypes.JUNTA else TaskTypes.EVENTO,
                             confidence = ConfidenceLevels.ALTA,
                             hasTime = !ev.allDay,
-                            originReference = "GCAL:${ev.uid}"
+                            originReference = "GCAL:${ev.uid}",
+                            meetingLink = meetingLink
                         )
                     )
                     ragEngine.indexContent(id, "TASK", ev.title, "General", "Evento de Google Calendar: ${ev.title}.")

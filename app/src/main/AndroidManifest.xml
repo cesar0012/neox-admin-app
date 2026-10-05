@@ -53,6 +53,12 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <service
+            android:name=".service.MeetingCaptureService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
         <receiver
             android:name=".data.notifications.TaskAlarmReceiver"
             android:enabled="true"

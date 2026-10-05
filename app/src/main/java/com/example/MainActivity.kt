@@ -1,6 +1,7 @@
 package com.example
 
 import android.os.Build
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -118,6 +119,14 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
+    // Intents de notificaciones (capturar junta / minuta lista) que llegan con la app abierta
+    private val newIntentState = androidx.compose.runtime.mutableStateOf<Intent?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        newIntentState.value = intent
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -140,6 +149,17 @@ class MainActivity : ComponentActivity() {
                 var currentTab by remember { mutableStateOf(NavigationTab.AGENDA) }
                 var showSecurityDialog by remember { mutableStateOf(false) }
                 var showProjectsDialog by remember { mutableStateOf(false) }
+                var prefillCaptureTitle by remember { mutableStateOf<String?>(null) }
+
+                // Enrutar intents de notificaciones: abrir Juntas (y precargar título de captura)
+                LaunchedEffect(newIntentState.value, this@MainActivity.intent) {
+                    val i = newIntentState.value ?: this@MainActivity.intent
+                    if (i?.getBooleanExtra("nav_meetings", false) == true) {
+                        currentTab = NavigationTab.MEETINGS
+                        i.getStringExtra("capture_title")?.let { prefillCaptureTitle = it }
+                        newIntentState.value = null
+                    }
+                }
 
                 val context = androidx.compose.ui.platform.LocalContext.current
                 var previousCrashLog by remember { mutableStateOf<String?>(null) }
@@ -299,7 +319,11 @@ class MainActivity : ComponentActivity() {
                             AnimatedContent(targetState = currentTab, label = "tab_switch") { target ->
                                 when (target) {
                                     NavigationTab.AGENDA -> AgendaScreen(viewModel = viewModel)
-                                    NavigationTab.MEETINGS -> MeetingsVaultScreen(viewModel = viewModel)
+                                    NavigationTab.MEETINGS -> MeetingsVaultScreen(
+                                        viewModel = viewModel,
+                                        prefillCaptureTitle = prefillCaptureTitle,
+                                        onPrefillConsumed = { prefillCaptureTitle = null }
+                                    )
                                     NavigationTab.ASSISTANT -> ChatAssistantScreen(viewModel = viewModel)
                                     NavigationTab.KNOWLEDGE -> KnowledgeRagScreen(viewModel = viewModel)
                                     NavigationTab.CONFIG -> SettingsScreen(viewModel = viewModel)

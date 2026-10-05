@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
@@ -34,6 +35,8 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
@@ -74,6 +77,7 @@ import com.example.data.model.MeetingNote
 import com.example.data.model.VaultEntry
 import com.example.ui.MainViewModel
 import com.example.ui.theme.OnCyan
+import com.example.ui.theme.RoseError
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
@@ -90,7 +94,11 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun MeetingsVaultScreen(viewModel: MainViewModel) {
+fun MeetingsVaultScreen(
+    viewModel: MainViewModel,
+    prefillCaptureTitle: String? = null,
+    onPrefillConsumed: () -> Unit = {}
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Captura y Dictado", "Minutas")
@@ -119,6 +127,41 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
     var liveTranscriptText by remember { mutableStateOf("") }
     var showMeetingDictation by remember { mutableStateOf(false) }
     var isOcrProcessing by remember { mutableStateOf(false) }
+    var captureTitle by remember { mutableStateOf("") }
+
+    // Captura en segundo plano (servicio): estado en vivo
+    val captureRunning by com.example.service.MeetingCaptureService.isRunning.collectAsStateWithLifecycle()
+    val captureLive by com.example.service.MeetingCaptureService.liveTranscript.collectAsStateWithLifecycle()
+    val hasGroqKey = viewModel.rotator.config.groqApiKey.isNotBlank()
+
+    // Título precargado desde la notificación "Capturar junta" de una tarea con link
+    LaunchedEffect(prefillCaptureTitle) {
+        if (!prefillCaptureTitle.isNullOrBlank()) {
+            captureTitle = prefillCaptureTitle
+            showMeetingDictation = true
+            onPrefillConsumed()
+        }
+    }
+
+    // Transcripción finalizada en segundo plano: llega directo al campo de la minuta
+    LaunchedEffect(Unit) {
+        com.example.service.MeetingCaptureService.consumeFinal()?.let { (title, transcript) ->
+            if (captureTitle.isBlank() && title.isNotBlank()) captureTitle = title
+            liveTranscriptText = transcript
+            Toast.makeText(context, "Junta capturada cargada: genera la minuta cuando quieras", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    var micGranted by remember {
+        mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+    }
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        micGranted = granted
+        if (granted) com.example.service.MeetingCaptureService.start(context, captureTitle)
+        else Toast.makeText(context, "Sin permiso de micrófono no se puede capturar la junta", Toast.LENGTH_SHORT).show()
+    }
 
     // OCR local (ML Kit): foto de pizarrón/documento -> texto en la transcripción
     val ocrLauncher = rememberLauncherForActivityResult(
@@ -204,6 +247,50 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                 contentPadding = PaddingValues(top = 16.dp, bottom = 88.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // ── Captura en segundo plano activa (llamada Meet/Teams/Zoom) ──
+                if (captureRunning) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = RoseError.copy(alpha = 0.07f)),
+                            border = CardDefaults.outlinedCardBorder().copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(RoseError.copy(alpha = 0.6f))
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Box(
+                                        modifier = Modifier.size(10.dp).clip(CircleShape).background(RoseError),
+                                        contentAlignment = Alignment.Center
+                                    ) {}
+                                    Text("Grabando junta en segundo plano", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Text(
+                                    "Puedes entrar a Meet/Teams/Zoom, bloquear la pantalla o usar otras apps: la captura sigue. Cada frase se transcribe con Whisper al instante.",
+                                    color = Slate400, fontSize = 10.sp, lineHeight = 14.sp
+                                )
+                                val words = captureLive.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+                                Text(
+                                    if (words == 0) "Escuchando..." else "$words palabras — última: «${captureLive.takeLast(90)}»",
+                                    color = CyanNeon, fontSize = 10.sp, lineHeight = 14.sp, maxLines = 2,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                                Button(
+                                    onClick = { com.example.service.MeetingCaptureService.stop(context) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = RoseError, contentColor = TextPrimary),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                                ) {
+                                    Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Terminar y generar minuta", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -306,7 +393,52 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
 
                             Spacer(modifier = Modifier.height(14.dp))
 
+                            // ── Título precargado (desde notificación de junta con link) ──
+                            if (captureTitle.isNotBlank()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(CyanNeon.copy(alpha = 0.12f))
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Text("En captura: ${captureTitle.take(44)}", color = CyanNeon, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                    Icon(
+                                        Icons.Default.Close, contentDescription = "Quitar título",
+                                        tint = CyanNeon, modifier = Modifier.size(13.dp).clickable { captureTitle = "" }
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+
                             // ── Acciones ──
+                            OutlinedButton(
+                                onClick = {
+                                    if (micGranted) com.example.service.MeetingCaptureService.start(context, captureTitle)
+                                    else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                },
+                                enabled = !captureRunning && hasGroqKey,
+                                shape = RoundedCornerShape(14.dp),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp, if (captureRunning || !hasGroqKey) Slate700 else RoseError.copy(alpha = 0.7f)
+                                ),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = if (captureRunning || !hasGroqKey) Slate700 else RoseError
+                                ),
+                                modifier = Modifier.fillMaxWidth().height(44.dp)
+                            ) {
+                                Icon(Icons.Default.Videocam, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    if (!hasGroqKey) "Captura en 2º plano (configura Groq en Rotador)"
+                                    else "Capturar en 2º plano (Meet / Teams / Zoom)",
+                                    fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
                             Button(
                                 onClick = { showMeetingDictation = true },
                                 colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
@@ -349,9 +481,11 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                     if (liveTranscriptText.isNotBlank()) {
                                         viewModel.captureMeetingAudioOrText(
                                             jobTag = effectiveJobTag,
-                                            rawTranscript = liveTranscriptText
+                                            rawTranscript = liveTranscriptText,
+                                            customTitle = captureTitle.takeIf { it.isNotBlank() }
                                         )
                                         liveTranscriptText = ""
+                                        captureTitle = ""
                                     }
                                 },
                                 enabled = liveTranscriptText.isNotBlank() && !isProcessing,

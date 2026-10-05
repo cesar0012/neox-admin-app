@@ -19,7 +19,8 @@ data class CalDavEvent(
     val start: Long,     // 0 con allDay=false imposible; allDay -> hora 00:00
     val end: Long,
     val allDay: Boolean,
-    val location: String = ""
+    val location: String = "",
+    val description: String = ""
 )
 
 /**
@@ -125,7 +126,8 @@ object CalDavClient {
                     start = dtStart,
                     end = dtEnd,
                     allDay = allDay,
-                    location = fields["LOCATION"]?.trim().orEmpty()
+                    location = fields["LOCATION"]?.trim().orEmpty(),
+                    description = fields["DESCRIPTION"]?.trim().orEmpty()
                 )
             )
         }

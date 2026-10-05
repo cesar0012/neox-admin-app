@@ -38,6 +38,8 @@ data class WorkTask(
     // Anticipaciones de notificación propias (CSV de minutos, catálogo NotificationLeads).
     // Vacío = heredar las omisión globales de Config.
     @ColumnInfo(defaultValue = "") val notifLeadsCsv: String = "",
+    // Link de la junta en linea (meet.google.com / zoom.us / teams.microsoft.com ...)
+    @ColumnInfo(defaultValue = "") val meetingLink: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 
