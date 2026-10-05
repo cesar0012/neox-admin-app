@@ -113,16 +113,13 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 Tab(
                     selected = selected,
                     onClick = { selectedTab = idx },
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Icon(tabIcon, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (selected) CyanNeon else Slate400)
-                            Text(
-                                label,
-                                fontSize = 12.sp,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selected) CyanNeon else Slate400
-                            )
-                        }
+                    icon = {
+                        Icon(
+                            tabIcon,
+                            contentDescription = label,
+                            modifier = Modifier.size(20.dp),
+                            tint = if (selected) CyanNeon else Slate400
+                        )
                     }
                 )
             }
