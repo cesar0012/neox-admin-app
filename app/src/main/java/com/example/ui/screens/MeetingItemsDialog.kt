@@ -69,7 +69,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.example.data.model.MeetingNote
 import com.example.data.model.MeetingTaskItem
 import com.example.data.model.TaskTypes
 import com.example.data.notifications.NotificationLeads
@@ -86,8 +85,8 @@ import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 import com.example.ui.theme.VioletAccent
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Date
+import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
 
@@ -102,7 +101,8 @@ import java.util.TimeZone
  */
 @Composable
 fun MeetingItemsDialog(
-    meeting: MeetingNote,
+    headerTitle: String,
+    headerDateLabel: String,
     items: List<MeetingTaskItem>,
     onDismiss: () -> Unit,
     onAdd: (MeetingTaskItem) -> Unit,
@@ -158,7 +158,8 @@ fun MeetingItemsDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Ítems Detectados en la Junta", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            "${meeting.title} · ${SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(meeting.dateTimestamp))}",
+                            if (headerDateLabel.isBlank()) headerTitle
+                            else "$headerTitle · $headerDateLabel",
                             color = Slate400,
                             fontSize = 10.sp,
                             maxLines = 1,

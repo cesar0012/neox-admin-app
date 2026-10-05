@@ -40,6 +40,18 @@ class AppPreferences(context: Context) {
         prefs.edit().putString("notif_leads_defaults", com.example.data.notifications.NotificationLeads.toCsv(set)).apply()
     }
 
+    /** Carpeta en la nube (SAF/Drive/Dropbox) para respaldos automáticos. */
+    fun getBackupTreeUri(): String = prefs.getString("backup_tree_uri", "") ?: ""
+    fun setBackupTreeUri(v: String) { prefs.edit().putString("backup_tree_uri", v).apply() }
+
+    // ── Integraciones: correo IMAP + CalDAV (Google) ──
+    fun getEmailUser(): String = prefs.getString("integ_email_user", "") ?: ""
+    fun setEmailUser(v: String) { prefs.edit().putString("integ_email_user", v.trim()).apply() }
+    fun getEmailPass(): String = prefs.getString("integ_email_pass", "") ?: ""
+    fun setEmailPass(v: String) { prefs.edit().putString("integ_email_pass", v.trim()).apply() }
+    fun getLastGcalImport(): Long = prefs.getLong("integ_gcal_last_import", 0L)
+    fun setLastGcalImport(v: Long) { prefs.edit().putLong("integ_gcal_last_import", v).apply() }
+
     /** Registro de códigos de alarma actualmente programados (para cancelar las que quedan viejas). */
     fun getScheduledAlarmCodes(): Set<Int> =
         prefs.getString("scheduled_alarm_codes", "")?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.toSet() ?: emptySet()

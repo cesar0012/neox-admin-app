@@ -64,6 +64,156 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val rotator = LLMRotator.getInstance(application)
     val prefs = AppPreferences(application)
 
+
+    // ─────────────────────────────────────────────────────────────
+    // INTEGRACIONES: correo (IMAP), Google Calendar (CalDAV) y PDF de minutas
+    // ─────────────────────────────────────────────────────────────
+
+    private val _isIntegrationsBusy = MutableStateFlow(false)
+    val isIntegrationsBusy: StateFlow<Boolean> = _isIntegrationsBusy
+
+    private val _integrationsMessage = MutableStateFlow<String?>(null)
+    val integrationsMessage: StateFlow<String?> = _integrationsMessage
+    fun consumeIntegrationsMessage() { _integrationsMessage.value = null }
+
+    /** Prueba la conexión IMAP con las credenciales guardadas. */
+    fun testEmailConnection() {
+        val user = prefs.getEmailUser(); val pass = prefs.getEmailPass()
+        if (user.isBlank() || pass.isBlank()) {
+            _integrationsMessage.value = "Captura primero tu correo y contrase\u00f1a de aplicaci\u00f3n."
+            return
+        }
+        viewModelScope.launch {
+            _isIntegrationsBusy.value = true
+            val err = com.example.data.integrations.EmailClient.testConnection(
+                com.example.data.integrations.EmailClient.configFor(user, pass)
+            )
+            _integrationsMessage.value = err ?: "Conexi\u00f3n correcta: $user"
+            _isIntegrationsBusy.value = false
+        }
+    }
+
+    /**
+     * Trae los \u00faltimos correos, arma un resumen y corre el MISMO extractor ag\u00e9ntico
+     * de juntas para detectar compromisos. Los \u00edtems quedan PENDIENTES con meetingId=0
+     * y se revisan en el pop-up (agregar a mis tareas / descartar).
+     */
+    fun analyzeRecentEmails() {
+        val user = prefs.getEmailUser(); val pass = prefs.getEmailPass()
+        if (user.isBlank() || pass.isBlank()) {
+            _integrationsMessage.value = "Captura primero tu correo y contrase\u00f1a de aplicaci\u00f3n."
+            return
+        }
+        viewModelScope.launch {
+            _isIntegrationsBusy.value = true
+            try {
+                val cfg = com.example.data.integrations.EmailClient.configFor(user, pass)
+                val emails = com.example.data.integrations.EmailClient.fetchRecent(cfg, 15)
+                    .getOrElse { t ->
+                        _integrationsMessage.value = "Error al leer correo: ${t.message?.take(120)}"
+                        _isIntegrationsBusy.value = false
+                        return@launch
+                    }
+                if (emails.isEmpty()) {
+                    _integrationsMessage.value = "No se encontraron correos."
+                    _isIntegrationsBusy.value = false
+                    return@launch
+                }
+                val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault())
+                val digest = emails.joinToString("\n\n") { m ->
+                    "[Correo de ${m.from} · ${if (m.date > 0) fmt.format(java.util.Date(m.date)) else "fecha n/d"}]\n" +
+                        "Asunto: ${m.subject}\n${m.snippet}"
+                }
+                val items = try {
+                    extractMeetingItemsViaLLM(digest, "Correos", "An\u00e1lisis de correos recientes")
+                } catch (t: Throwable) {
+                    android.util.Log.e("MainViewModel", "email extract error: ${t.message}", t)
+                    emptyList()
+                }
+                if (items.isEmpty()) {
+                    _integrationsMessage.value = "Se analizaron ${emails.size} correos y no se detectaron compromisos."
+                } else {
+                    db.meetingItemDao().insertItems(items.map { it.copy(meetingId = 0L, owner = if (it.owner == "INDEFINIDO") "YO" else it.owner) })
+                    _integrationsMessage.value = "${emails.size} correos analizados: ${items.size} compromisos detectados. Rev\u00edralos en el pop-up."
+                }
+            } finally {
+                _isIntegrationsBusy.value = false
+            }
+        }
+    }
+
+    /** Importa los eventos de Google Calendar de los pr\u00f3ximos 14 d\u00edas como tareas EVENTO (sin duplicar por UID). */
+    fun importGoogleCalendar() {
+        val user = prefs.getEmailUser(); val pass = prefs.getEmailPass()
+        if (user.isBlank() || pass.isBlank()) {
+            _integrationsMessage.value = "Captura primero tu correo y contrase\u00f1a de aplicaci\u00f3n (CalDAV usa las mismas credenciales)."
+            return
+        }
+        viewModelScope.launch {
+            _isIntegrationsBusy.value = true
+            try {
+                val now = System.currentTimeMillis()
+                val events = com.example.data.integrations.CalDavClient.fetchEvents(
+                    user, pass, now, now + 14L * 24 * 3600 * 1000
+                ).getOrElse { t ->
+                    _integrationsMessage.value = "Error CalDAV: ${t.message?.take(140)}"
+                    return@launch
+                }
+                val existing = db.taskDao().getAllTasksSync()
+                val existingUids = existing.mapNotNull { t ->
+                    t.originReference.removePrefix("GCAL:").takeIf { t.originReference.startsWith("GCAL:") }
+                }.toSet()
+                var created = 0
+                events.filter { it.uid !in existingUids && it.start > now }.forEach { ev ->
+                    val isJunta = listOf("junta", "reunion", "reuni\u00f3n", "meeting", "1:1", "sync").any {
+                        ev.title.lowercase(java.util.Locale.getDefault()).contains(it)
+                    }
+                    val id = db.taskDao().insertTask(
+                        WorkTask(
+                            title = ev.title.take(80),
+                            description = buildString {
+                                append("Evento importado de Google Calendar")
+                                if (ev.location.isNotBlank()) append("  \u00b7  Lugar: ${ev.location}")
+                            },
+                            jobTag = "General",
+                            dueTimestamp = ev.start,
+                            priority = "MEDIA",
+                            taskType = if (isJunta) TaskTypes.JUNTA else TaskTypes.EVENTO,
+                            confidence = ConfidenceLevels.ALTA,
+                            hasTime = !ev.allDay,
+                            originReference = "GCAL:${ev.uid}"
+                        )
+                    )
+                    ragEngine.indexContent(id, "TASK", ev.title, "General", "Evento de Google Calendar: ${ev.title}.")
+                    created++
+                }
+                prefs.setLastGcalImport(now)
+                _integrationsMessage.value = "Google Calendar: ${events.size} eventos pr\u00f3ximos, $created nuevos en tu agenda."
+                rescheduleAlarms()
+            } finally {
+                _isIntegrationsBusy.value = false
+            }
+        }
+    }
+
+    /** Genera el PDF de la minuta y lanza el intent de compartir. */
+    fun shareMeetingPdf(meeting: MeetingNote) {
+        viewModelScope.launch {
+            val items = db.meetingItemDao().getAllItemsSync().filter { it.meetingId == meeting.id }
+            try {
+                val intent = com.example.data.integrations.PdfMinutesExporter.export(getApplication(), meeting, items)
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                getApplication<Application>().startActivity(
+                    android.content.Intent.createChooser(intent, "Compartir minuta").apply {
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "pdf export error: ${t.message}", t)
+            }
+        }
+    }
+
     /**
      * Dictado inteligente: transcripción con Whisper vía Groq (misma API key del rotador).
      * null cuando no hay API key de Groq configurada — el modal usa entonces el modo directo.
@@ -2421,6 +2571,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (t: Throwable) {
             android.util.Log.e("MainViewModel", "buildBackupJson error: ${t.message}", t)
             "{}"
+        }
+    }
+
+    /**
+     * Respaldo directo a la carpeta en la nube elegida con SAF (Drive/Dropbox/otro
+     * proveedor de documentos): crea un nuevo JSON con fecha y lo escribe allá.
+     */
+    fun backupNowToCloud(context: Context) {
+        val treeStr = prefs.getBackupTreeUri()
+        if (treeStr.isBlank()) {
+            _backupResult.value = "❌ Elige primero una carpeta en la nube"
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val tree = android.net.Uri.parse(treeStr)
+                val name = "neox_backup_" +
+                    SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date()) + ".json"
+                val docUri = android.provider.DocumentsContract.createDocument(
+                    context.contentResolver, tree, "application/json", name
+                )
+                if (docUri == null) {
+                    _backupResult.value = "❌ La carpeta ya no está disponible; vuelve a elegirla"
+                    return@launch
+                }
+                context.contentResolver.openOutputStream(docUri)?.use { out ->
+                    out.write(buildBackupJson().toByteArray(Charsets.UTF_8))
+                }
+                _backupResult.value = "✅ Respaldo subido a la carpeta en la nube ($name)"
+            } catch (t: Throwable) {
+                android.util.Log.e("MainViewModel", "backupNowToCloud error: ${t.message}", t)
+                _backupResult.value = "❌ Error al respaldar a la nube: ${t.message}"
+            }
         }
     }
 

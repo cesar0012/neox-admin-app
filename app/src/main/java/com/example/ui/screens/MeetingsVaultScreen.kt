@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,6 +26,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -86,6 +91,7 @@ import java.util.Locale
 
 @Composable
 fun MeetingsVaultScreen(viewModel: MainViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Captura y Dictado", "Minutas")
 
@@ -112,6 +118,39 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
 
     var liveTranscriptText by remember { mutableStateOf("") }
     var showMeetingDictation by remember { mutableStateOf(false) }
+    var isOcrProcessing by remember { mutableStateOf(false) }
+
+    // OCR local (ML Kit): foto de pizarrón/documento -> texto en la transcripción
+    val ocrLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            isOcrProcessing = true
+            try {
+                val image = com.google.mlkit.vision.common.InputImage.fromFilePath(context, uri)
+                com.google.mlkit.vision.text.TextRecognition.getClient(
+                    com.google.mlkit.vision.text.latin.TextRecognizerOptions.Builder().build()
+                ).process(image)
+                    .addOnSuccessListener { result ->
+                        val text = result.text.trim()
+                        if (text.isNotEmpty()) {
+                            liveTranscriptText = if (liveTranscriptText.isBlank()) text
+                            else liveTranscriptText.trim() + "\n" + text
+                            Toast.makeText(context, "OCR: texto agregado a la transcripción", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "No se detectó texto en la imagen", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    .addOnFailureListener {
+                        Toast.makeText(context, "OCR falló: ${it.message?.take(80)}", Toast.LENGTH_SHORT).show()
+                    }
+                    .addOnCompleteListener { isOcrProcessing = false }
+            } catch (t: Throwable) {
+                isOcrProcessing = false
+                Toast.makeText(context, "No se pudo abrir la imagen", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     var meetingToEdit by remember { mutableStateOf<MeetingNote?>(null) }
     var openItemsMeeting by remember { mutableStateOf<MeetingNote?>(null) }
 
@@ -280,6 +319,27 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                 Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Dictar / Grabar Junta", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            OutlinedButton(
+                                onClick = { ocrLauncher.launch("image/*") },
+                                enabled = !isOcrProcessing,
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Slate700),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon),
+                                modifier = Modifier.fillMaxWidth().height(40.dp)
+                            ) {
+                                if (isOcrProcessing) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), color = CyanNeon, strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Reconociendo texto...", fontSize = 11.sp)
+                                } else {
+                                    Icon(Icons.Default.DocumentScanner, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Escanear imagen / pizarrón (OCR)", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                                }
                             }
 
                             Spacer(modifier = Modifier.height(10.dp))
@@ -468,7 +528,8 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
                                     onToggleConcluded = { viewModel.toggleMeetingConcluded(meeting) },
                                     onEdit = { meetingToEdit = meeting },
                                     pendingItemCount = itemsByMeeting[meeting.id].orEmpty().count { it.status == "PENDIENTE" },
-                                    onOpenItems = { openItemsMeeting = meeting }
+                                    onOpenItems = { openItemsMeeting = meeting },
+                                    onSharePdf = { viewModel.shareMeetingPdf(meeting) }
                                 )
                             }
                         }
@@ -572,7 +633,8 @@ fun MeetingsVaultScreen(viewModel: MainViewModel) {
     openItemsMeeting?.let { meeting ->
         val itemsForMeeting = meetingItems.filter { it.meetingId == meeting.id }
         MeetingItemsDialog(
-            meeting = meeting,
+            headerTitle = meeting.title,
+            headerDateLabel = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(meeting.dateTimestamp)),
             items = itemsForMeeting,
             onDismiss = { openItemsMeeting = null },
             onAdd = { viewModel.addMeetingItemToTasks(it) },
@@ -682,7 +744,8 @@ fun MeetingCard(
     onToggleConcluded: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
     pendingItemCount: Int = 0,
-    onOpenItems: (() -> Unit)? = null
+    onOpenItems: (() -> Unit)? = null,
+    onSharePdf: (() -> Unit)? = null
 ) {
     var isExpanded by remember { mutableStateOf(false) }
     val dateStr = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(meeting.dateTimestamp))
@@ -732,6 +795,11 @@ fun MeetingCard(
                     }
                 }
 
+                if (onSharePdf != null) {
+                    IconButton(onClick = onSharePdf, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.PictureAsPdf, contentDescription = "Exportar minuta a PDF", tint = EmeraldSuccess, modifier = Modifier.size(16.dp))
+                    }
+                }
                 if (onEdit != null) {
                     IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.Edit, contentDescription = "Editar junta", tint = Slate400, modifier = Modifier.size(15.dp))

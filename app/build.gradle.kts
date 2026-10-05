@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.omniwork.qxrvmp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 26
-    versionName = "1.9.4"
+    versionCode = 27
+    versionName = "1.10.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -35,6 +35,17 @@ android {
       storePassword = "android"
       keyAlias = "androiddebugkey"
       keyPassword = "android"
+    }
+  }
+
+  packaging {
+    resources {
+      excludes += "/META-INF/{AL2.0,LGPL2.1}"
+      excludes += "/META-INF/NOTICE.md"
+      excludes += "/META-INF/LICENSE.md"
+      excludes += "/META-INF/NOTICE.txt"
+      excludes += "/META-INF/LICENSE.txt"
+      excludes += "/META-INF/DEPENDENCIES"
     }
   }
 
@@ -76,6 +87,10 @@ secrets {
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
+  // Correo (IMAP/Gmail con contraseña de aplicación) y OCR local
+  implementation("com.sun.mail:android-mail:1.6.7")
+  implementation("com.sun.mail:android-activation:1.6.7")
+  implementation("com.google.mlkit:text-recognition:16.0.1")
   // implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)

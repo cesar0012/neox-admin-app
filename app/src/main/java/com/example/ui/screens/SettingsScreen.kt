@@ -35,6 +35,16 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Mail
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
@@ -60,6 +70,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.MainViewModel
 import com.example.ui.theme.OnCyan
 import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.VioletAccent
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.EmeraldSuccess
@@ -68,7 +79,7 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 
-private val SETTINGS_TABS = listOf("Rotador", "Wi-Fi PC", "Notif.", "Backup")
+private val SETTINGS_TABS = listOf("Rotador", "Wi-Fi PC", "Notif.", "Integr.", "Backup")
 
 /**
  * Sección unificada de Configuración: Rotador de modelos, puente Wi-Fi con la PC
@@ -95,6 +106,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     0 -> Icons.Default.RotateRight
                     1 -> Icons.Default.Laptop
                     2 -> Icons.Default.Notifications
+                    3 -> Icons.Default.Extension
                     else -> Icons.Default.Download
                 }
                 val selected = selectedTab == idx
@@ -120,8 +132,236 @@ fun SettingsScreen(viewModel: MainViewModel) {
             0 -> RotatorStatusScreen(viewModel = viewModel)
             1 -> DesktopBridgeScreen(viewModel = viewModel)
             2 -> NotificationsSection(viewModel = viewModel)
+            3 -> IntegrationsSection(viewModel = viewModel)
             else -> BackupSection(viewModel = viewModel)
         }
+    }
+}
+
+/**
+ * Integraciones del agente: correo (IMAP con contraseña de aplicación) y Google
+ * Calendar (CalDAV, lectura). Los compromisos detectados en correos se revisan con el
+ * mismo pop-up de ítems de las juntas antes de entrar a tus tareas.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun IntegrationsSection(viewModel: MainViewModel) {
+    val busy by viewModel.isIntegrationsBusy.collectAsStateWithLifecycle()
+    val message by viewModel.integrationsMessage.collectAsStateWithLifecycle()
+    val meetingItems by viewModel.allMeetingItems.collectAsStateWithLifecycle()
+
+    var user by remember { mutableStateOf(viewModel.prefs.getEmailUser()) }
+    var pass by remember { mutableStateOf(viewModel.prefs.getEmailPass()) }
+    var showPass by remember { mutableStateOf(false) }
+    var showEmailItems by remember { mutableStateOf(false) }
+    val emailItems = meetingItems.filter { it.meetingId == 0L }
+    val pendingEmailItems = emailItems.count { it.status == "PENDIENTE" }
+
+    LaunchedEffect(message) {
+        if (message != null) {
+            kotlinx.coroutines.delay(8000)
+            viewModel.consumeIntegrationsMessage()
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 88.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(CyanNeon.copy(alpha = 0.35f))
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(
+                            modifier = Modifier.size(38.dp).clip(CircleShape).background(CyanNeon.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Mail, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(19.dp))
+                        }
+                        Column {
+                            Text("Correo (Gmail / IMAP)", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text("El agente lee tus últimos correos y detecta compromisos", color = Slate400, fontSize = 11.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Solo lectura. Necesitas una Contraseña de Aplicación: en tu cuenta de Google, Seguridad > Verificación en 2 pasos > Contraseñas de aplicaciones.",
+                        color = Slate400, fontSize = 10.sp, lineHeight = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = user,
+                        onValueChange = { user = it },
+                        label = { Text("Correo", color = Slate400) },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 13.sp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = CyanNeon, unfocusedBorderColor = Slate700, focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = pass,
+                        onValueChange = { pass = it },
+                        label = { Text("Contraseña de aplicación", color = Slate400) },
+                        singleLine = true,
+                        visualTransformation = if (showPass) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        trailingIcon = {
+                            TextButton(onClick = { showPass = !showPass }) {
+                                Text(if (showPass) "Ocultar" else "Ver", color = CyanNeon, fontSize = 10.sp)
+                            }
+                        },
+                        textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 13.sp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = CyanNeon, unfocusedBorderColor = Slate700, focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.prefs.setEmailUser(user)
+                                viewModel.prefs.setEmailPass(pass)
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Guardar", color = CyanNeon, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.prefs.setEmailUser(user)
+                                viewModel.prefs.setEmailPass(pass)
+                                viewModel.testEmailConnection()
+                            },
+                            enabled = !busy,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Probar conexión", color = CyanNeon, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            viewModel.prefs.setEmailUser(user)
+                            viewModel.prefs.setEmailPass(pass)
+                            viewModel.analyzeRecentEmails()
+                        },
+                        enabled = !busy,
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                    ) {
+                        if (busy) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), color = OnCyan, strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Analizando...", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Text("Analizar últimos 15 correos", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate700))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(
+                            modifier = Modifier.size(38.dp).clip(CircleShape).background(VioletAccent.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.DateRange, contentDescription = null, tint = VioletAccent, modifier = Modifier.size(19.dp))
+                        }
+                        Column {
+                            Text("Google Calendar (CalDAV)", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text("Importa tus próximos eventos a la agenda de Neox", color = Slate400, fontSize = 11.sp)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Usa el correo y contraseña de aplicación de arriba. Los eventos de los próximos 14 días se importan como Juntas/Eventos sin duplicarse.",
+                        color = Slate400, fontSize = 10.sp, lineHeight = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = { viewModel.importGoogleCalendar() },
+                        enabled = !busy && user.isNotBlank() && pass.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = VioletAccent, contentColor = TextPrimary),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                    ) {
+                        Text("Importar próximos 14 días", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        if (emailItems.isNotEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = Slate900),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(if (pendingEmailItems > 0) AmberWarning else Slate800)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Compromisos detectados en correos", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            if (pendingEmailItems > 0) "$pendingEmailItems pendientes de revisión"
+                            else "${emailItems.count { it.status == "AGREGADA" }} ya agregados a tus tareas",
+                            color = if (pendingEmailItems > 0) AmberWarning else EmeraldSuccess,
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = { showEmailItems = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = OnCyan),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().height(40.dp)
+                        ) {
+                            Text("Revisar ítems detectados", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        message?.let { msg ->
+            item {
+                Text(msg, color = AmberWarning, fontSize = 11.sp, lineHeight = 15.sp)
+            }
+        }
+    }
+
+    if (showEmailItems) {
+        MeetingItemsDialog(
+            headerTitle = "Compromisos detectados en correos",
+            headerDateLabel = "",
+            items = emailItems,
+            onDismiss = { showEmailItems = false },
+            onAdd = { viewModel.addMeetingItemToTasks(it) },
+            onDiscard = { viewModel.discardMeetingItem(it) },
+            onSetSchedule = { item, due, hasTime -> viewModel.updateMeetingItemSchedule(item, due, hasTime) },
+            onRename = { item, title -> viewModel.renameMeetingItem(item, title) },
+            onSetOwner = { item, owner -> viewModel.setMeetingItemOwner(item, owner) },
+            defaultNotifLeads = viewModel.prefs.getNotifLeadDefaults(),
+            onSetLeads = { item, csv -> viewModel.setMeetingItemNotifLeads(item, csv) }
+        )
     }
 }
 
@@ -228,6 +468,27 @@ private fun BackupSection(viewModel: MainViewModel) {
         if (uri != null) viewModel.writeBackupTo(context, uri)
     }
 
+    // Carpeta en la nube (Google Drive / Dropbox) vía selector del sistema (SAF)
+    var cloudTreeUri by remember { mutableStateOf(viewModel.prefs.getBackupTreeUri()) }
+    val cloudFolderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            cloudTreeUri = uri.toString()
+            viewModel.prefs.setBackupTreeUri(uri.toString())
+            Toast.makeText(context, "Carpeta en la nube lista para respaldos", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val cloudFolderName = if (cloudTreeUri.isBlank()) null
+    else android.net.Uri.parse(cloudTreeUri).lastPathSegment?.substringAfter(":")?.ifBlank { null } ?: "carpeta elegida"
+
     LaunchedEffect(backupResult) {
         if (backupResult != null) {
             Toast.makeText(context, backupResult, Toast.LENGTH_LONG).show()
@@ -302,6 +563,40 @@ private fun BackupSection(viewModel: MainViewModel) {
                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Descargar respaldo (.json)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Respaldo directo a carpeta en la nube (Drive/Dropbox vía selector del sistema)
+                Text("Respaldo en la nube (Google Drive / Dropbox):", color = Slate400, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedButton(
+                    onClick = { cloudFolderLauncher.launch(null) },
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Slate700),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon),
+                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                ) {
+                    Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        if (cloudFolderName == null) "Elegir carpeta en la nube"
+                        else "Carpeta: $cloudFolderName (cambiar)",
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false
+                    )
+                }
+                if (cloudTreeUri.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Button(
+                        onClick = { viewModel.backupNowToCloud(context) },
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess, contentColor = TextPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                    ) {
+                        Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Respaldar ahora a la nube", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
