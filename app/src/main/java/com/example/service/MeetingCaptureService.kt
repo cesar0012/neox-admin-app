@@ -83,6 +83,9 @@ class MeetingCaptureService : Service() {
     private val processing = AtomicInteger(0)
     private var recorder: AudioSegmentRecorder? = null
     private var captureTitle: String = ""
+    @Volatile private var vaultEntryId: Long = 0L
+    @Volatile private var lastVoiceAt: Long = System.currentTimeMillis()
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onBind(intent: Intent?) = null
 
@@ -95,7 +98,9 @@ class MeetingCaptureService : Service() {
             }
             ACTION_STOP -> stopCapture()
         }
-        return START_NOT_STICKY
+        // STICKY: si el sistema mata el servicio, lo reinicia (la transcripción ya
+        // persistida en la bóveda no se pierde y la captura continúa)
+        return START_STICKY
     }
 
     private fun startCapture() {
@@ -113,17 +118,48 @@ class MeetingCaptureService : Service() {
             onError = { Log.e(TAG, "recorder: $it") }
         ).apply { start() }
 
+        // Respaldo en bóveda DESDE EL INICIO: si el servicio muere o el teléfono se
+        // apaga, todo lo transcrito hasta ese momento ya está guardado.
+        serviceScope.launch {
+            try {
+                vaultEntryId = com.example.data.db.AppDatabase.getInstance(application)
+                    .vaultDao().insertVaultEntry(
+                        com.example.data.model.VaultEntry(
+                            title = captureTitle.ifBlank { "Captura: junta en curso" },
+                            rawContent = "",
+                            sourceType = "MEET_BG",
+                            jobTag = "General",
+                            timestamp = System.currentTimeMillis(),
+                            retentionDays = 10
+                        )
+                    )
+            } catch (t: Throwable) {
+                Log.e(TAG, "vault insert: ${t.message}")
+            }
+        }
+
         scope.launch {
             for (wav in queue) {
                 processing.incrementAndGet()
                 try {
                     if (key.isNotBlank()) {
-                        WhisperTranscriber.transcribe(wav, key).onSuccess { text ->
+                        // Reintento con espera: la transcripción nunca se descarta por un
+                        // error de red o límite de tasa momentáneo de la API
+                        var result: Result<String>? = null
+                        for (attempt in 1..3) {
+                            val r = WhisperTranscriber.transcribe(wav, key)
+                            if (r.isSuccess) { result = r; break }
+                            result = r
+                            if (attempt < 3) delay(if (attempt == 1) 2_500L else 8_000L)
+                        }
+                        result?.onSuccess { text ->
                             if (text.isNotBlank()) {
+                                lastVoiceAt = System.currentTimeMillis()
                                 liveTranscript.value = appendPhrase(liveTranscript.value, text)
+                                persistToVault()
                                 updateOngoingNotification()
                             }
-                        }
+                        } ?: Log.e(TAG, "transcribe falló tras reintentos: ${result?.exceptionOrNull()?.message}")
                     }
                 } catch (t: Throwable) {
                     Log.e(TAG, "transcribe: ${t.message}")
@@ -131,6 +167,19 @@ class MeetingCaptureService : Service() {
                     processing.decrementAndGet()
                 }
             }
+        }
+    }
+
+    /** Persiste la transcripción acumulada en la entrada de la bóveda (en vivo). */
+    private fun persistToVault() {
+        val id = vaultEntryId
+        if (id <= 0L) return
+        val content = liveTranscript.value
+        serviceScope.launch {
+            try {
+                com.example.data.db.AppDatabase.getInstance(application)
+                    .vaultDao().updateVaultEntryContent(id, content)
+            } catch (_: Exception) {}
         }
     }
 
@@ -144,6 +193,13 @@ class MeetingCaptureService : Service() {
                 while (processing.get() > 0) delay(250)
             }
             val text = liveTranscript.value.trim()
+            if (vaultEntryId > 0L) {
+                // Título definitivo y contenido final en la bóveda
+                runCatching {
+                    com.example.data.db.AppDatabase.getInstance(application)
+                        .vaultDao().updateVaultEntryContent(vaultEntryId, text)
+                }
+            }
             if (text.isNotEmpty()) {
                 pendingFinalTranscript = text
                 pendingFinalTitle = captureTitle
@@ -180,7 +236,7 @@ class MeetingCaptureService : Service() {
         putExtra("nav_meetings", true)
     }
 
-    private fun buildOngoingNotification(words: Int): android.app.Notification {
+    private fun buildOngoingNotification(words: Int, silentTooLong: Boolean = false): android.app.Notification {
         initChannel()
         val stopPi = PendingIntent.getService(
             this, 1,
@@ -190,7 +246,13 @@ class MeetingCaptureService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("🎙️ Grabando junta${if (captureTitle.isNotBlank()) ": ${captureTitle.take(40)}" else ""}")
-            .setContentText(if (words > 0) "$words palabras — puedes cambiar de app o bloquear la pantalla" else "Transcribiendo con Whisper... puedes cambiar de app")
+            .setContentText(
+                when {
+                    silentTooLong -> "Sin voz detectada en los últimos minutos — revisa parlante/audífonos y permisos de micrófono"
+                    words > 0 -> "$words palabras — puedes cambiar de app o bloquear la pantalla"
+                    else -> "Transcribiendo con Whisper... puedes cambiar de app"
+                }
+            )
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -205,6 +267,15 @@ class MeetingCaptureService : Service() {
         val words = liveTranscript.value.trim().split(Regex("\\s+")).count { it.isNotBlank() }
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIF_ID, buildOngoingNotification(words))
+        // Vigía: si pasan más de 3 min sin detectar voz nueva, avisar en la notificación
+        serviceScope.launch {
+            delay(190_000)
+            if (isRunning.value && System.currentTimeMillis() - lastVoiceAt > 180_000) {
+                val w2 = liveTranscript.value.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+                val nm2 = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm2.notify(NOTIF_ID, buildOngoingNotification(w2, silentTooLong = true))
+            }
+        }
     }
 
     private fun showFinalNotification(text: String?) {

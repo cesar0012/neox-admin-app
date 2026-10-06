@@ -1160,6 +1160,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Reprocesa un registro de la bóveda con el pipeline agéntico completo (minuta + ítems). */
+    fun reprocessVaultEntry(entry: com.example.data.model.VaultEntry) {
+        if (entry.rawContent.isBlank()) return
+        val cleanTitle = entry.title.removeSuffix(" (Pendiente de procesar con LLM)")
+        captureMeetingAudioOrText(
+            jobTag = entry.jobTag,
+            rawTranscript = entry.rawContent,
+            customTitle = cleanTitle.ifBlank { null }
+        )
+    }
+
+    /** Elimina un registro de la bóveda antes de su retención (p. ej. captura fallida). */
+    fun deleteVaultEntry(entry: com.example.data.model.VaultEntry) {
+        viewModelScope.launch { db.vaultDao().deleteVaultEntry(entry.id) }
+    }
+
     /** Edición de una junta/minuta (título y proyecto). */
     fun updateMeetingDetails(meeting: MeetingNote, newTitle: String, newJobTag: String) {
         viewModelScope.launch {

@@ -170,6 +170,12 @@ interface VaultDao {
     @Query("UPDATE vault_entries SET jobTag = :jobTag WHERE id = :id")
     suspend fun updateVaultEntryJobTag(id: Long, jobTag: String)
 
+    @Query("UPDATE vault_entries SET rawContent = :content WHERE id = :id")
+    suspend fun updateVaultEntryContent(id: Long, content: String)
+
+    @Query("DELETE FROM vault_entries WHERE id = :id")
+    suspend fun deleteVaultEntry(id: Long)
+
     @Query("DELETE FROM vault_entries WHERE timestamp < :cutoffTimestamp")
     suspend fun cleanExpiredEntries(cutoffTimestamp: Long)
 

@@ -25,9 +25,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
@@ -131,6 +133,12 @@ fun MeetingsVaultScreen(
 
     // Captura en segundo plano (servicio): estado en vivo
     val captureRunning by com.example.service.MeetingCaptureService.isRunning.collectAsStateWithLifecycle()
+    val powerManager = remember {
+        context.getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+    }
+    var batteryUnrestricted by remember(captureRunning) {
+        mutableStateOf(powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true)
+    }
     val captureLive by com.example.service.MeetingCaptureService.liveTranscript.collectAsStateWithLifecycle()
     val hasGroqKey = viewModel.rotator.config.groqApiKey.isNotBlank()
 
@@ -275,6 +283,10 @@ fun MeetingsVaultScreen(
                                     if (words == 0) "Escuchando..." else "$words palabras — última: «${captureLive.takeLast(90)}»",
                                     color = CyanNeon, fontSize = 10.sp, lineHeight = 14.sp, maxLines = 2,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    "✓ Guardado en vivo en la bóveda (nada se pierde aunque el sistema la detenga)",
+                                    color = EmeraldSuccess, fontSize = 9.sp
                                 )
                                 Button(
                                     onClick = { com.example.service.MeetingCaptureService.stop(context) },
@@ -435,6 +447,39 @@ fun MeetingsVaultScreen(
                                     else "Capturar en 2º plano (Meet / Teams / Zoom)",
                                     fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false
                                 )
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // Xiaomi/Android pueden matar la captura por ahorro de batería: pedir exención
+                            if (!batteryUnrestricted) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(AmberWarning.copy(alpha = 0.1f))
+                                        .border(1.dp, AmberWarning.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            runCatching {
+                                                context.startActivity(
+                                                    android.content.Intent(
+                                                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                                        android.net.Uri.parse("package:" + context.packageName)
+                                                    )
+                                                )
+                                            }
+                                            Toast.makeText(context, "Permite 'Sin restricciones' para que la captura y las alarmas nunca se detengan", Toast.LENGTH_LONG).show()
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(Icons.Default.BatteryAlert, contentDescription = null, tint = AmberWarning, modifier = Modifier.size(15.dp))
+                                    Text(
+                                        "Quitar restricciones de batería (recomendado para capturas largas)",
+                                        color = AmberWarning, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, lineHeight = 12.sp
+                                    )
+                                }
                             }
 
                             Spacer(modifier = Modifier.height(8.dp))
@@ -742,7 +787,12 @@ fun MeetingsVaultScreen(
                             }
                         } else {
                             items(vaultEntries, key = { it.id }) { entry ->
-                                VaultEntryCard(entry = entry)
+                                VaultEntryCard(
+                                    entry = entry,
+                                    isProcessing = isProcessing,
+                                    onReprocess = { viewModel.reprocessVaultEntry(entry) },
+                                    onDelete = { viewModel.deleteVaultEntry(entry) }
+                                )
                             }
                         }
                     }
@@ -1065,10 +1115,22 @@ fun MeetingCard(
 }
 
 @Composable
-fun VaultEntryCard(entry: VaultEntry) {
-    val dateStr = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date(entry.timestamp))
+fun VaultEntryCard(
+    entry: VaultEntry,
+    isProcessing: Boolean = false,
+    onReprocess: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null
+) {
+    val dateStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(entry.timestamp))
     val elapsedDays = ((System.currentTimeMillis() - entry.timestamp) / (1000 * 3600 * 24)).toInt()
     val remainingDays = (entry.retentionDays - elapsedDays).coerceAtLeast(1)
+    var confirmDelete by remember(entry.id) { mutableStateOf(false) }
+
+    val sourceLabel = when (entry.sourceType) {
+        "MEET_BG" -> "Captura de llamada"
+        "LIVE_DICTATION" -> "Dictado"
+        else -> entry.sourceType
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1076,30 +1138,38 @@ fun VaultEntryCard(entry: VaultEntry) {
         colors = CardDefaults.cardColors(containerColor = Slate900),
         border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate800))
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.Lock, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(14.dp))
-                    Text(entry.title, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(EmeraldSuccess.copy(alpha = 0.15f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text("$remainingDays días restantes", color = EmeraldSuccess, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Título en su propia línea (con candado de respaldo)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Lock, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(13.dp))
+                Text(
+                    entry.title,
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Fecha: $dateStr | Origen: ${entry.sourceType}", color = Slate400, fontSize = 10.sp)
-
-            Spacer(modifier = Modifier.height(6.dp))
+            // Metadatos en línea de chips separada
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(EmeraldSuccess.copy(alpha = 0.13f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) { Text("$remainingDays días restantes", color = EmeraldSuccess, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Slate800)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) { Text(sourceLabel, color = Slate400, fontSize = 9.sp, fontWeight = FontWeight.Medium) }
+                Text(dateStr, color = Slate700, fontSize = 9.sp)
+            }
 
             Box(
                 modifier = Modifier
@@ -1112,8 +1182,60 @@ fun VaultEntryCard(entry: VaultEntry) {
                     text = entry.rawContent,
                     color = Slate400,
                     fontSize = 11.sp,
-                    maxLines = 3
+                    maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
+            }
+
+            // Acciones: reprocesar con IA / eliminar
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (onReprocess != null) {
+                    OutlinedButton(
+                        onClick = onReprocess,
+                        enabled = !isProcessing && entry.rawContent.isNotBlank(),
+                        shape = RoundedCornerShape(8.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, CyanNeon.copy(alpha = 0.6f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (isProcessing) {
+                            CircularProgressIndicator(modifier = Modifier.size(12.dp), color = CyanNeon, strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(12.dp))
+                        }
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            if (isProcessing) "Procesando..." else "Procesar con IA",
+                            fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false
+                        )
+                    }
+                }
+                if (onDelete != null) {
+                    OutlinedButton(
+                        onClick = { if (confirmDelete) onDelete() else confirmDelete = true },
+                        shape = RoundedCornerShape(8.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp, if (confirmDelete) RoseError.copy(alpha = 0.7f) else Slate700
+                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = if (confirmDelete) RoseError else Slate400),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            if (confirmDelete) "¿Confirmar borrado?" else "Eliminar",
+                            fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false
+                        )
+                    }
+                }
+            }
+            if (confirmDelete) {
+                LaunchedEffect(entry.id) {
+                    kotlinx.coroutines.delay(2500)
+                    confirmDelete = false
+                }
             }
         }
     }
