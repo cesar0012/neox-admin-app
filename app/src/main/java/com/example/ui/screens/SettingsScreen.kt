@@ -175,7 +175,9 @@ private fun IntegrationsSection(viewModel: MainViewModel) {
                     brush = androidx.compose.ui.graphics.SolidColor(CyanNeon.copy(alpha = 0.35f))
                 )
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(0.dp)) {
+                    com.example.ui.theme.AccentStrip()
+                    Column(modifier = Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Box(
                             modifier = Modifier.size(38.dp).clip(CircleShape).background(CyanNeon.copy(alpha = 0.15f)),
@@ -262,6 +264,7 @@ private fun IntegrationsSection(viewModel: MainViewModel) {
                         } else {
                             Text("Analizar últimos 15 correos", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
+                    }
                     }
                 }
             }

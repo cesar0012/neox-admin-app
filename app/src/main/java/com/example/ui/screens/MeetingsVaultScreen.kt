@@ -285,7 +285,7 @@ fun MeetingsVaultScreen(
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    "✓ Guardado en vivo en la bóveda (nada se pierde aunque el sistema la detenga)",
+                                    "Guardado en vivo en la bóveda — nada se pierde aunque el sistema la detenga",
                                     color = EmeraldSuccess, fontSize = 9.sp
                                 )
                                 Button(
@@ -312,7 +312,9 @@ fun MeetingsVaultScreen(
                             brush = androidx.compose.ui.graphics.SolidColor(CyanNeon.copy(alpha = 0.35f))
                         )
                     ) {
-                        Column(modifier = Modifier.padding(18.dp)) {
+                        Column(modifier = Modifier.padding(0.dp)) {
+                            com.example.ui.theme.AccentStrip()
+                            Column(modifier = Modifier.padding(18.dp)) {
                             // ── Encabezado ──
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -571,6 +573,7 @@ fun MeetingsVaultScreen(
                                 fontSize = 9.sp,
                                 lineHeight = 13.sp
                             )
+                            }
                         }
                     }
                 }

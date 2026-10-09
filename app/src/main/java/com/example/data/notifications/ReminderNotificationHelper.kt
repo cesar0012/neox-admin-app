@@ -65,7 +65,7 @@ object ReminderNotificationHelper {
                 .setContentText("$advanceNoticeText: $description")
                 .setStyle(
                     NotificationCompat.BigTextStyle()
-                        .bigText("$advanceNoticeText: $description\n\n📌 Trabajo/Proyecto: $jobTag")
+                        .bigText("$advanceNoticeText: $description\n\nProyecto: $jobTag")
                 )
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
@@ -104,7 +104,7 @@ object ReminderNotificationHelper {
                 .setContentText(message)
                 .setStyle(
                     NotificationCompat.BigTextStyle()
-                        .bigText("$message\n\n🎯 Proyecto: $jobTag\nAlerta Proactiva del Asistente OmniWork")
+                        .bigText("$message\n\nProyecto: $jobTag\nAlerta proactiva de Neox Admin")
                 )
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setAutoCancel(true)
@@ -151,7 +151,7 @@ object ReminderNotificationHelper {
                             context,
                             notificationId = (task.id + 10000).toInt(),
                             title = task.title,
-                            message = "⚠️ TAREA VENCIDA: Esta entrega estaba programada para días anteriores. Conclúyela o actualiza su estado en la agenda.",
+                            message = "TAREA VENCIDA — Esta entrega estaba programada para días anteriores. Conclúyela o actualiza su estado en la agenda.",
                             alertType = "VENCIDA",
                             jobTag = task.jobTag
                         )
@@ -162,7 +162,7 @@ object ReminderNotificationHelper {
                             context,
                             notificationId = (task.id + 20000).toInt(),
                             title = task.title,
-                            message = "🚨 VENCE HOY: Debes concluir esta tarea el día de hoy (${task.jobTag}).",
+                            message = "VENCE HOY — Debes concluir esta tarea el día de hoy (${task.jobTag}).",
                             alertType = "VENCE HOY",
                             jobTag = task.jobTag
                         )
@@ -173,7 +173,7 @@ object ReminderNotificationHelper {
                             context,
                             notificationId = (task.id + 30000).toInt(),
                             title = task.title,
-                            message = "⏳ PRÓXIMOS DÍAS: Quedan $dayDiff día" + (if (dayDiff == 1) "" else "s") + " para la fecha de entrega.",
+                            message = "PRÓXIMOS DÍAS — Quedan $dayDiff día" + (if (dayDiff == 1) "" else "s") + " para la fecha de entrega.",
                             alertType = "PRÓXIMOS 5 DÍAS",
                             jobTag = task.jobTag
                         )
@@ -184,7 +184,7 @@ object ReminderNotificationHelper {
                             context,
                             notificationId = (task.id + 40000).toInt(),
                             title = task.title,
-                            message = "⚠️ ALERTA DE AVANCE: Quedan $dayDiff días para concluir este proyecto. Se recomienda iniciar y asegurar el tiempo de desarrollo necesario.",
+                            message = "ALERTA DE AVANCE — Quedan $dayDiff días para concluir este proyecto. Se recomienda iniciar y asegurar el tiempo de desarrollo necesario.",
                             alertType = "REGLA DE ENTREGA",
                             jobTag = task.jobTag
                         )

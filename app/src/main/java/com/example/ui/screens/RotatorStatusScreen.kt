@@ -503,7 +503,7 @@ fun CleanCandidateCard(candidate: ModelCandidate) {
                 Spacer(modifier = Modifier.height(3.dp))
 
                 val tierLabel = when (com.example.data.rotator.ModelQuality.tierOf(candidate.modelId)) {
-                    com.example.data.rotator.ModelQuality.TIER_STRONG -> "⚡ Calidad Alta"
+                    com.example.data.rotator.ModelQuality.TIER_STRONG -> "Calidad alta"
                     com.example.data.rotator.ModelQuality.TIER_WEAK -> "Débil"
                     else -> "Calidad Media"
                 }

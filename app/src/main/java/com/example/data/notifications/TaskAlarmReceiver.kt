@@ -202,8 +202,8 @@ class TaskAlarmReceiver : BroadcastReceiver() {
         val builder = NotificationCompat.Builder(context, if (isAlarm) AlarmScheduler.ALARM_CHANNEL_ID else ReminderNotificationHelper.CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(
-                if (isAlarm) "🔔 ALARMA: ${task.title}"
-                else "⏰ ${task.title}"
+                if (isAlarm) "ALARMA · ${task.title}"
+                else task.title
             )
             .setContentText("$remainingText · ${task.jobTag}")
             .setStyle(
@@ -219,7 +219,7 @@ class TaskAlarmReceiver : BroadcastReceiver() {
         // Junta en línea: botón directo para capturar la reunión (Meet/Teams/Zoom)
         if (hasLink) {
             builder.addAction(
-                0, "🎙️ Capturar junta",
+                0, "Capturar junta",
                 PendingIntent.getActivity(
                     context, (task.id + 80000).toInt(),
                     openIntent,

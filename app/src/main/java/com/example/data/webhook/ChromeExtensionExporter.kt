@@ -82,7 +82,7 @@ object ChromeExtensionExporter {
   </style>
 </head>
 <body>
-  <h2><span>⚡</span> OmniWork Bridge <span class="badge">Wi-Fi</span></h2>
+  <h2>OmniWork Bridge <span class="badge">Wi-Fi</span></h2>
   
   <label for="phoneIp">IP del Celular (Puerto $port)</label>
   <input type="text" id="phoneIp" value="http://$phoneIp:$port" placeholder="http://192.168.x.x:$port">
@@ -101,8 +101,8 @@ object ChromeExtensionExporter {
   <label for="taskDesc">Detalle / Código / Contexto</label>
   <textarea id="taskDesc" rows="3" placeholder="Pega aquí código, instrucciones o notas..."></textarea>
 
-  <button id="btnSendTask">🚀 Enviar a OmniWork (Celular)</button>
-  <button id="btnSendTab" class="secondary">📄 Enviar Pestaña Actual</button>
+  <button id="btnSendTask">Enviar a OmniWork (Celular)</button>
+  <button id="btnSendTab" class="secondary">Enviar Pestaña Actual</button>
 
   <div id="status"></div>
 
@@ -194,7 +194,7 @@ document.addEventListener('DOMContentLoaded', () => {
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "send-to-omniwork",
-    title: "⚡ Enviar texto seleccionado a OmniWork",
+    title: "Enviar texto seleccionado a OmniWork",
     contexts: ["selection"]
   });
 });

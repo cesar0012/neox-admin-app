@@ -615,7 +615,7 @@ fun VoiceDictationDialog(
                                 isEditing -> "Editando — micrófono en pausa"
                                 sending -> "Enviando cuando termine la transcripción..."
                                 effectiveMode == "ia" && processingCount > 0 ->
-                                    "🧠 Whisper procesando ${processingCount} frase" + (if (processingCount == 1) "" else "s") + "..."
+                                    "Whisper procesando ${processingCount} frase" + (if (processingCount == 1) "" else "s") + "..."
                                 effectiveMode == "ia" -> "Transcripción IA (puntuación y mayúsculas automáticas)"
                                 isListening -> "Escuchando (lo parcial va en cian)"
                                 else -> "Transcripción"
@@ -728,7 +728,7 @@ fun VoiceDictationDialog(
                                     }
                                     if (effectiveMode == "ia" && processingCount > 0 && micActive) {
                                         Text(
-                                            text = " 🧠 …",
+                                            text = " …",
                                             color = CyanNeon.copy(alpha = 0.55f),
                                             fontSize = 15.sp
                                         )

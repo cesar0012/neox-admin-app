@@ -1762,10 +1762,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun produceChatResponse(polishedUserText: String, activeProject: String): Triple<String, String?, List<RAGQueryResult>> {
         // 1. Guard check for "Todos" mode: Protect against write/modify operations
         if (activeProject == "Todos" && isWriteOrModifyIntent(polishedUserText)) {
-            val guardWarning = "⚠️ **Modo 'Todos los proyectos' Protegido:**\n\n" +
+            val guardWarning = "**Modo 'Todos los proyectos' protegido:**\n\n" +
                 "En este modo global únicamente se permite la consulta de información, discusión estratégica y revisión general de tus trabajos.\n\n" +
                 "Para evitar confusiones y asegurar que una tarea o apunte no recaiga en un proyecto equivocado, **las acciones de guardar, modificar, concluir o borrar tareas y notas RAG están protegidas**.\n\n" +
-                "👉 **Por favor, selecciona arriba el proyecto específico** que mencionaste y vuelve a enviarme este mensaje para realizar la acción de inmediato."
+                "**Selecciona arriba el proyecto específico** que mencionaste y vuelve a enviarme este mensaje para realizar la acción de inmediato."
             return Triple(guardWarning, "Neox Guard Protection", emptyList())
         }
 
@@ -2005,7 +2005,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     id, "TASK", title, activeProject,
                     "Tarea: $title. Tipo: ${TaskTypes.labelOf(task.taskType)}. Proyecto: $activeProject."
                 )
-                "\n\n✅ *[Acción ejecutada: ${TaskTypes.labelOf(task.taskType)} \"$title\" agendada en $activeProject para ${formatDueForHumans(due)}]*" +
+                "\n\n*[Acción ejecutada: ${TaskTypes.labelOf(task.taskType)} \"$title\" agendada en $activeProject para ${formatDueForHumans(due)}]*" +
                     when {
                         due <= 0L -> " *Sin fecha: pendiente de día y hora — dime cuándo la agendo.*"
                         !withTime -> " *Hora no especificada: quedó a las ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(due))} por defecto; dime si la cambio.*"
@@ -2037,7 +2037,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         rescheduleAlarms()
                         val horaTxt = if (withTime) "" else " *(sin hora específica: 9:00 por defecto)*"
-                        "\n\n✅ *[Acción ejecutada: Tarea \"${target.title}\" re-agendada: ${formatDueForHumans(due)}$horaTxt en $activeProject]*"
+                        "\n\n*[Acción ejecutada: Tarea \"${target.title}\" re-agendada: ${formatDueForHumans(due)}$horaTxt en $activeProject]*"
                     } else {
                         ""
                     }
@@ -2053,7 +2053,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (target != null) {
                     db.taskDao().updateTaskStatus(target.id, "TERMINADO", true)
-                    "\n\n✅ *[Acción ejecutada: Tarea \"${target.title}\" marcada como Concluida en $activeProject]*"
+                    "\n\n*[Acción ejecutada: Tarea \"${target.title}\" marcada como concluida en $activeProject]*"
                 } else {
                     ""
                 }
@@ -2065,7 +2065,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (target != null) {
                     db.taskDao().deleteTask(target)
                     db.memoryDao().deleteChunksBySource(target.id, "TASK")
-                    "\n\n🗑️ *[Acción ejecutada: Tarea \"${target.title}\" eliminada de $activeProject]*"
+                    "\n\n*[Acción ejecutada: Tarea \"${target.title}\" eliminada de $activeProject]*"
                 } else {
                     ""
                 }
@@ -2092,7 +2092,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "REPORTE" -> "Reporte"
                     else -> "Nota"
                 }
-                "\n\n💾 *[Acción ejecutada: $catLabel \"$title\" guardada en Memoria de $activeProject]*"
+                "\n\n*[Acción ejecutada: $catLabel \"$title\" guardada en Memoria de $activeProject]*"
             }
             else -> ""
         }
@@ -2150,7 +2150,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             if (matched != null) {
                 db.taskDao().updateTaskStatus(matched.id, "TERMINADO", true)
-                return "✅ **Tarea Concluida:**\nHe marcado como **Concluida** la tarea:\n• **\"${matched.title}\"**\nAsociada al proyecto **$activeProject**."
+                return "**Tarea concluida:**\nHe marcado como **Concluida** la tarea:\n• **\"${matched.title}\"**\nAsociada al proyecto **$activeProject**."
             } else {
                 val taskList = projectTasks.filter { !it.isCompleted }.joinToString("\n") { "• ${it.title}" }
                 return "No identifiqué qué tarea concluir en **$activeProject**. Tus tareas pendientes son:\n\n$taskList"
@@ -2182,7 +2182,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (matched != null) {
                 db.taskDao().deleteTask(matched)
                 db.memoryDao().deleteChunksBySource(matched.id, "TASK")
-                return "🗑️ **Tarea Eliminada:**\nHe borrado la tarea **\"${matched.title}\"** del proyecto **$activeProject** de tu agenda y memoria RAG."
+                return "**Tarea eliminada:**\nHe borrado la tarea **\"${matched.title}\"** del proyecto **$activeProject** de tu agenda y memoria RAG."
             } else {
                 val taskList = projectTasks.joinToString("\n") { "• ${it.title}" }
                 return "No encontré la tarea para eliminar en **$activeProject**. Las tareas disponibles son:\n\n$taskList"
@@ -2212,7 +2212,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     target.copy(dueTimestamp = due, hasTime = reschedHour != null || target.hasTime)
                 )
                 val dateFmt = SimpleDateFormat("EEEE d 'de' MMMM, HH:mm", Locale("es", "ES")).format(Date(parsedDue))
-                return "📅 **Tarea Re-agendada:**\nCorregí la fecha de la tarea:\n• **\"${target.title}\"**\nNuevo vencimiento: **$dateFmt** (proyecto **$activeProject**).\n\nSi no era esta tarea, dime su nombre y la fecha correcta."
+                return "**Tarea re-agendada:**\nCorregí la fecha de la tarea:\n• **\"${target.title}\"**\nNuevo vencimiento: **$dateFmt** (proyecto **$activeProject**).\n\nSi no era esta tarea, dime su nombre y la fecha correcta."
             }
             return "No encontré ninguna tarea para re-agendar en el proyecto **$activeProject**. Dime el nombre de la tarea y la fecha correcta."
         }
@@ -2279,12 +2279,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val confLabel = when (extracted.confidence) { "BAJA" -> "Baja"; "MEDIA" -> "Media"; else -> "Alta" }
             val defaultsNotice = buildString {
                 if (extracted.dueTimestamp <= 0L) {
-                    append("\n\n📌 No especificaste día ni hora: quedó como pendiente sin fecha (no aparece en calendario). Dime la fecha y la re-agendo, o edítala en la Agenda.")
+                    append("\n\nNota: no especificaste día ni hora; quedó como pendiente sin fecha (no aparece en calendario). Dime la fecha y la re-agendo, o edítala en la Agenda.")
                 } else if (!extracted.hasTime) {
-                    append("\n\n📌 No especificaste hora: quedó a las ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(extracted.dueTimestamp))} por defecto. Dime si la cambio, o edítala en la Agenda.")
+                    append("\n\nNota: no especificaste hora; quedó a las ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(extracted.dueTimestamp))} por defecto. Dime si la cambio, o edítala en la Agenda.")
                 }
             }
-            return "✅ **$typeLabel Agendada en $activeProject:**\n" +
+            return "**$typeLabel agendada en $activeProject:**\n" +
                 "• **Título:** ${extracted.title}\n" +
                 "• **Tipo:** $typeLabel\n" +
                 "• **Prioridad:** ${extracted.priority}\n" +
@@ -2326,7 +2326,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "REPORTE" -> "Reporte"
                 else -> "Nota"
             }
-            return "💾 **$catLabel guardada en $activeProject:**\n" +
+            return "**$catLabel guardada en $activeProject:**\n" +
                 "• **Título:** ${note.title}\n" +
                 "• **Categoría:** $catLabel\n\n" +
                 "Ya está disponible en la sección **Memoria** bajo el proyecto **$activeProject**, vectorizada en RAG."
@@ -2604,7 +2604,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun backupNowToCloud(context: Context) {
         val treeStr = prefs.getBackupTreeUri()
         if (treeStr.isBlank()) {
-            _backupResult.value = "❌ Elige primero una carpeta en la nube"
+            _backupResult.value = "Elige primero una carpeta en la nube"
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -2616,16 +2616,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     context.contentResolver, tree, "application/json", name
                 )
                 if (docUri == null) {
-                    _backupResult.value = "❌ La carpeta ya no está disponible; vuelve a elegirla"
+                    _backupResult.value = "La carpeta ya no está disponible; vuelve a elegirla"
                     return@launch
                 }
                 context.contentResolver.openOutputStream(docUri)?.use { out ->
                     out.write(buildBackupJson().toByteArray(Charsets.UTF_8))
                 }
-                _backupResult.value = "✅ Respaldo subido a la carpeta en la nube ($name)"
+                _backupResult.value = "Respaldo subido a la carpeta en la nube ($name)"
             } catch (t: Throwable) {
                 android.util.Log.e("MainViewModel", "backupNowToCloud error: ${t.message}", t)
-                _backupResult.value = "❌ Error al respaldar a la nube: ${t.message}"
+                _backupResult.value = "Error al respaldar a la nube: ${t.message}"
             }
         }
     }
@@ -2637,10 +2637,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 context.contentResolver.openOutputStream(uri)?.use { out ->
                     out.write(json.toByteArray(Charsets.UTF_8))
                 }
-                _backupResult.value = "✅ Respaldo descargado correctamente"
+                _backupResult.value = "Respaldo descargado correctamente"
             } catch (t: Throwable) {
                 android.util.Log.e("MainViewModel", "writeBackupTo error: ${t.message}", t)
-                _backupResult.value = "❌ Error al generar el respaldo: ${t.message}"
+                _backupResult.value = "Error al generar el respaldo: ${t.message}"
             }
         }
     }

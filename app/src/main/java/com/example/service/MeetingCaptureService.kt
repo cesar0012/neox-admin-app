@@ -245,7 +245,7 @@ class MeetingCaptureService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("🎙️ Grabando junta${if (captureTitle.isNotBlank()) ": ${captureTitle.take(40)}" else ""}")
+            .setContentTitle("Grabando junta${if (captureTitle.isNotBlank()) ": ${captureTitle.take(40)}" else ""}")
             .setContentText(
                 when {
                     silentTooLong -> "Sin voz detectada en los últimos minutos — revisa parlante/audífonos y permisos de micrófono"
@@ -284,7 +284,7 @@ class MeetingCaptureService : Service() {
             val words = text.trim().split(Regex("\\s+")).count { it.isNotBlank() }
             NotificationCompat.Builder(this, ReminderChannelHolder.REMINDERS_CHANNEL)
                 .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle("✅ Junta capturada ($words palabras)")
+                .setContentTitle("Junta capturada ($words palabras)")
                 .setContentText("Toca para revisarla y generar la minuta")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)

@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColorAsState
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -275,27 +277,52 @@ class MainActivity : ComponentActivity() {
                             if (imeBottom == 0) {
                                 NavigationBar(
                                     containerColor = Slate900,
-                                    contentColor = CyanNeon
+                                    contentColor = CyanNeon,
+                                    tonalElevation = 0.dp
                                 ) {
                                     NavigationTab.values().forEach { tab ->
                                         val isSelected = currentTab == tab
+                                        val pillColor by animateColorAsState(
+                                            targetValue = if (isSelected) CyanNeon.copy(alpha = 0.14f) else androidx.compose.ui.graphics.Color.Transparent,
+                                            animationSpec = tween(220),
+                                            label = "nav_pill_${tab.name}"
+                                        )
+                                        val iconTint by animateColorAsState(
+                                            targetValue = if (isSelected) CyanNeon else Slate400,
+                                            animationSpec = tween(220),
+                                            label = "nav_icon_${tab.name}"
+                                        )
                                         NavigationBarItem(
                                             selected = isSelected,
                                             onClick = { currentTab = tab },
                                             icon = {
-                                                Icon(tab.icon, contentDescription = tab.label)
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(CircleShape)
+                                                        .background(pillColor)
+                                                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        tab.icon,
+                                                        contentDescription = tab.label,
+                                                        tint = iconTint,
+                                                        modifier = Modifier.size(21.dp)
+                                                    )
+                                                }
                                             },
                                             label = {
                                                 Text(
                                                     tab.label,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                                    fontSize = 9.5.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    letterSpacing = 0.1.sp
                                                 )
                                             },
                                             colors = NavigationBarItemDefaults.colors(
                                                 selectedIconColor = CyanNeon,
                                                 selectedTextColor = CyanNeon,
-                                                indicatorColor = Slate800,
+                                                indicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                                                 unselectedIconColor = Slate400,
                                                 unselectedTextColor = Slate400
                                             ),

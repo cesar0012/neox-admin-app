@@ -402,7 +402,9 @@ fun AgendaListView(
                 colors = CardDefaults.cardColors(containerColor = Slate900),
                 border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate700))
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(0.dp)) {
+                    com.example.ui.theme.AccentStrip()
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -466,6 +468,7 @@ fun AgendaListView(
                                 Text("$jobsCount", color = CyanNeon, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                             }
                         }
+                    }
                     }
                 }
             }
@@ -1095,21 +1098,21 @@ fun AgendaKanbanBoardView(
             }
             item {
                 FilterChip(
-                    label = "🟡 Pendiente (${pendingTasks.size})",
+                    label = "Pendiente (${pendingTasks.size})",
                     isSelected = selectedColumnFilter == "PENDIENTE",
                     onClick = { selectedColumnFilter = "PENDIENTE" }
                 )
             }
             item {
                 FilterChip(
-                    label = "🔵 En Proceso (${inProgressTasks.size})",
+                    label = "En proceso (${inProgressTasks.size})",
                     isSelected = selectedColumnFilter == "EN_PROCESO",
                     onClick = { selectedColumnFilter = "EN_PROCESO" }
                 )
             }
             item {
                 FilterChip(
-                    label = "🟢 Concluido (${completedTasks.size})",
+                    label = "Concluido (${completedTasks.size})",
                     isSelected = selectedColumnFilter == "TERMINADO",
                     onClick = { selectedColumnFilter = "TERMINADO" }
                 )

@@ -56,6 +56,7 @@ fun MyApplicationTheme(
     MaterialTheme(
         colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
         typography = Typography,
+        shapes = NeoxShapes,
         content = content
     )
 }
