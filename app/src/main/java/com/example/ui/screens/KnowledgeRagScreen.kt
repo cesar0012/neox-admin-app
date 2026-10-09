@@ -383,7 +383,7 @@ fun RagChunkCard(result: RAGQueryResult) {
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            Text("« ${result.chunk.exactQuote} »", color = Color(0xFF67E8F9), fontSize = 12.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+            Text("« ${result.chunk.exactQuote} »", color = com.example.ui.theme.CyanAccent, fontSize = 12.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
 
             Spacer(modifier = Modifier.height(4.dp))
 

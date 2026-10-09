@@ -106,6 +106,7 @@ import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
+import com.example.ui.theme.AppBgDeep
 import com.example.ui.theme.Slate950
 import com.example.ui.theme.VioletAccent
 
@@ -208,8 +209,14 @@ class MainActivity : ComponentActivity() {
                     val imeBottom = WindowInsets.ime.getBottom(density)
 
                     Scaffold(
-                        modifier = Modifier.fillMaxSize(),
-                        containerColor = MaterialTheme.colorScheme.background,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    listOf(Slate950, Slate950, AppBgDeep)
+                                )
+                            ),
+                        containerColor = androidx.compose.ui.graphics.Color.Transparent,
                         topBar = {
                             TopAppBar(
                                 title = {

@@ -1079,7 +1079,7 @@ fun MeetingCard(
                             quotesList.forEach { q ->
                                 Text(
                                     text = "« $q »",
-                                    color = Color(0xFF67E8F9),
+                                    color = com.example.ui.theme.CyanAccent,
                                     fontSize = 11.sp,
                                     fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                                     modifier = Modifier.padding(vertical = 1.dp)

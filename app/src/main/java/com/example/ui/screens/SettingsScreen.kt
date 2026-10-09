@@ -299,7 +299,7 @@ private fun IntegrationsSection(viewModel: MainViewModel) {
                     Button(
                         onClick = { viewModel.importGoogleCalendar() },
                         enabled = !busy && user.isNotBlank() && pass.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(containerColor = VioletAccent, contentColor = TextPrimary),
+                        colors = ButtonDefaults.buttonColors(containerColor = VioletAccent, contentColor = androidx.compose.ui.graphics.Color.White),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth().height(42.dp)
                     ) {

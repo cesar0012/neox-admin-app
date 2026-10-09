@@ -890,7 +890,7 @@ fun CleanChatBubble(message: ChatMessage, onSpeak: () -> Unit) {
                             ) {
                                 Text(
                                     text = "${cit.chunk.title.take(22)} (${cit.chunk.dateString})",
-                                    color = Color(0xFF67E8F9),
+                                    color = com.example.ui.theme.CyanAccent,
                                     fontSize = 10.sp
                                 )
                             }
