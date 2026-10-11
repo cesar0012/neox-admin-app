@@ -91,6 +91,9 @@ val OnCyan: Color get() = Color(0xFFFFFFFF)
 /** Extremo inferior del degradado del lienzo de la app (profundidad de página). */
 val AppBgDeep: Color get() = if (NeoxThemeState.isDark) Color(0xFF120E1A) else Color(0xFFE4E0F0)
 
+/** Superficie del dock flotante inferior: un escalón más elevada que las tarjetas. */
+val DockSurface: Color get() = if (NeoxThemeState.isDark) Color(0xFF2E2840) else Color(0xFFFFFFFF)
+
 /** Burbuja del usuario en el chat: azul royal fijo en ambos temas, con texto blanco fijo. */
 val BubbleUserBg: Color get() = Color(0xFF4D8AF0)
 val OnBubbleUser: Color get() = Color(0xFFFFFFFF)
