@@ -57,9 +57,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -228,9 +229,8 @@ class MainActivity : ComponentActivity() {
                                         Box(
                                             modifier = Modifier
                                                 .size(38.dp)
-                                                .clip(CircleShape)
-                                                .background(Slate800)
-                                                .border(1.dp, Slate700, CircleShape),
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(Slate800),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Image(
@@ -272,7 +272,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 colors = TopAppBarDefaults.topAppBarColors(
-                                    containerColor = Slate900,
+                                    containerColor = Slate950,
                                     titleContentColor = TextPrimary,
                                     navigationIconContentColor = TextPrimary,
                                     actionIconContentColor = TextPrimary
@@ -280,61 +280,84 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         bottomBar = {
-                            // La barra de navegación se oculta con el teclado abierto
+                            // Dock estilo diseño de referencia: 4 destinos a los lados y un
+                            // FAB central violeta con glow que abre el Asistente (5º destino).
+                            // La barra se oculta con el teclado abierto.
                             if (imeBottom == 0) {
-                                NavigationBar(
-                                    containerColor = Slate900,
-                                    contentColor = CyanNeon,
-                                    tonalElevation = 0.dp
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Slate950)
                                 ) {
-                                    NavigationTab.values().forEach { tab ->
-                                        val isSelected = currentTab == tab
-                                        val pillColor by animateColorAsState(
-                                            targetValue = if (isSelected) CyanNeon.copy(alpha = 0.14f) else androidx.compose.ui.graphics.Color.Transparent,
-                                            animationSpec = tween(220),
-                                            label = "nav_pill_${tab.name}"
-                                        )
-                                        val iconTint by animateColorAsState(
-                                            targetValue = if (isSelected) CyanNeon else Slate400,
-                                            animationSpec = tween(220),
-                                            label = "nav_icon_${tab.name}"
-                                        )
-                                        NavigationBarItem(
-                                            selected = isSelected,
-                                            onClick = { currentTab = tab },
-                                            icon = {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(76.dp)
+                                            .navigationBarsPadding(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        NavigationTab.values().forEach { tab ->
+                                            if (tab == NavigationTab.ASSISTANT) {
+                                                // Ranura central reservada al FAB del Asistente
                                                 Box(
                                                     modifier = Modifier
-                                                        .clip(CircleShape)
-                                                        .background(pillColor)
-                                                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                                                        .width(78.dp)
+                                                        .testTag("nav_tab_assistant_fab"),
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    Icon(
-                                                        tab.icon,
-                                                        contentDescription = tab.label,
-                                                        tint = iconTint,
-                                                        modifier = Modifier.size(21.dp)
+                                                    val assistantSelected = currentTab == NavigationTab.ASSISTANT
+                                                    val fabRing by animateColorAsState(
+                                                        targetValue = if (assistantSelected) TextPrimary else androidx.compose.ui.graphics.Color.Transparent,
+                                                        animationSpec = tween(220),
+                                                        label = "nav_fab_ring"
                                                     )
+                                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .offset(y = (-6).dp)
+                                                                .size(56.dp)
+                                                                .shadow(
+                                                                    16.dp,
+                                                                    shape = CircleShape,
+                                                                    ambientColor = VioletAccent,
+                                                                    spotColor = VioletAccent
+                                                                )
+                                                                .clip(CircleShape)
+                                                                .background(
+                                                                    androidx.compose.ui.graphics.Brush.linearGradient(
+                                                                        listOf(VioletAccent, CyanNeon)
+                                                                    )
+                                                                )
+                                                                .border(2.5.dp, fabRing, CircleShape)
+                                                                .clickable { currentTab = NavigationTab.ASSISTANT },
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(
+                                                                Icons.Default.AutoAwesome,
+                                                                contentDescription = NavigationTab.ASSISTANT.label,
+                                                                tint = androidx.compose.ui.graphics.Color.White,
+                                                                modifier = Modifier.size(26.dp)
+                                                            )
+                                                        }
+                                                        Text(
+                                                            NavigationTab.ASSISTANT.label,
+                                                            fontSize = 9.5.sp,
+                                                            fontWeight = if (assistantSelected) FontWeight.Bold else FontWeight.Medium,
+                                                            letterSpacing = 0.1.sp,
+                                                            color = if (assistantSelected) VioletAccent else Slate400,
+                                                            modifier = Modifier.offset(y = (-4).dp)
+                                                        )
+                                                    }
                                                 }
-                                            },
-                                            label = {
-                                                Text(
-                                                    tab.label,
-                                                    fontSize = 9.5.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                    letterSpacing = 0.1.sp
+                                            } else {
+                                                DockItem(
+                                                    tab = tab,
+                                                    isSelected = currentTab == tab,
+                                                    onClick = { currentTab = tab },
+                                                    modifier = Modifier.weight(1f)
                                                 )
-                                            },
-                                            colors = NavigationBarItemDefaults.colors(
-                                                selectedIconColor = CyanNeon,
-                                                selectedTextColor = CyanNeon,
-                                                indicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                                                unselectedIconColor = Slate400,
-                                                unselectedTextColor = Slate400
-                                            ),
-                                            modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
-                                        )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -606,6 +629,59 @@ private fun ModernTopBarButton(
         contentAlignment = Alignment.Center
     ) {
         Icon(icon, contentDescription = description, tint = tint, modifier = Modifier.size(17.dp))
+    }
+}
+
+/**
+ * Ítem del dock inferior: píldora animada tras el icono + etiqueta compacta.
+ * Réplica del estilo del diseño de referencia (active pill, sin caja de indicador).
+ */
+@Composable
+private fun DockItem(
+    tab: NavigationTab,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val pillColor by animateColorAsState(
+        targetValue = if (isSelected) CyanNeon.copy(alpha = 0.16f) else androidx.compose.ui.graphics.Color.Transparent,
+        animationSpec = tween(220),
+        label = "nav_pill_${tab.name}"
+    )
+    val iconTint by animateColorAsState(
+        targetValue = if (isSelected) CyanNeon else Slate400,
+        animationSpec = tween(220),
+        label = "nav_icon_${tab.name}"
+    )
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp)
+            .testTag("nav_tab_${tab.name.lowercase()}")
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(pillColor)
+                .padding(horizontal = 14.dp, vertical = 5.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                tab.icon,
+                contentDescription = tab.label,
+                tint = iconTint,
+                modifier = Modifier.size(21.dp)
+            )
+        }
+        Text(
+            tab.label,
+            fontSize = 9.5.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            letterSpacing = 0.1.sp,
+            color = if (isSelected) CyanNeon else Slate400
+        )
     }
 }
 

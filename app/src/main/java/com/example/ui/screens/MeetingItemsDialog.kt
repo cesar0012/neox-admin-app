@@ -126,7 +126,7 @@ fun MeetingItemsDialog(
                 .padding(10.dp),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = CardDefaults.outlinedCardBorder().copy(brush = SolidColor(Slate700))
+            border = androidx.compose.foundation.BorderStroke(0.dp, androidx.compose.ui.graphics.Color.Transparent)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // ───────── Cabecera ─────────

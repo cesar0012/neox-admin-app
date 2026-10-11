@@ -468,7 +468,7 @@ fun ChatAssistantScreen(viewModel: MainViewModel) {
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate700))
+            border = androidx.compose.foundation.BorderStroke(0.dp, androidx.compose.ui.graphics.Color.Transparent)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
@@ -834,7 +834,7 @@ fun CleanChatBubble(message: ChatMessage, onSpeak: () -> Unit) {
             colors = CardDefaults.cardColors(
                 containerColor = if (isUser) BubbleUserBg else Slate900
             ),
-            border = if (isUser) null else CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate800)),
+            border = if (isUser) null else androidx.compose.foundation.BorderStroke(0.dp, androidx.compose.ui.graphics.Color.Transparent),
             modifier = Modifier
                 .fillMaxWidth(if (isUser) 0.85f else 0.95f)
                 .combinedClickable(

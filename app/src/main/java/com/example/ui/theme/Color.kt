@@ -14,51 +14,52 @@ object NeoxThemeState {
 }
 
 /**
- * PALETA OSCURA — "Azul Medianoche": fondo casi negro azulado y tarjetas claramente
- * elevadas (contraste real fondo↔tarjeta = sensación de profundidad, no plano gris).
+ * PALETA OSCURA — "Ciruela Nocturna": fondo ciruela casi negro, tarjetas flotantes sin borde
+ * (elevación por contraste real fondo↔tarjeta), acentos azul royal + violeta con glow.
+ * Tokens extraídos del diseño de referencia (dashboard violeta).
  */
 private object DarkPalette {
-    val slate950 = Color(0xFF050912)   // fondo de página (profundo)
-    val slate900 = Color(0xFF101A2E)   // tarjetas (elevadas, azul navy)
-    val slate800 = Color(0xFF1B2942)   // chips / superficies elevadas
-    val slate700 = Color(0xFF2D4064)   // bordes (azulados, visibles)
-    val slate600 = Color(0xFF5A6E92)
-    val slate400 = Color(0xFF9BB0CC)   // texto secundario (claro, legible)
-    val slate200 = Color(0xFFCBD8E8)
-    val slate100 = Color(0xFFEDF2F9)
-    val cyanNeon = Color(0xFF22D3EE)   // cian firma (neón contenido)
-    val cyanAccent = Color(0xFF38BDF8)
-    val cyanSurface = Color(0xFF0B3B4A)
-    val violet = Color(0xFFA78BFA)
-    val violetSurface = Color(0xFF2E1065)
-    val emerald = Color(0xFF34D399)
+    val slate950 = Color(0xFF1A1523)   // fondo de página (ciruela profundo)
+    val slate900 = Color(0xFF262031)   // tarjetas (flotan sobre el fondo)
+    val slate800 = Color(0xFF332D42)   // chips / superficies elevadas
+    val slate700 = Color(0xFF3E3750)   // separadores (sutil, casi invisible)
+    val slate600 = Color(0xFF5A5470)
+    val slate400 = Color(0xFF9A94B0)   // texto secundario (lila claro, legible)
+    val slate200 = Color(0xFFCFC9DE)
+    val slate100 = Color(0xFFF1EEF9)
+    val cyanNeon = Color(0xFF5B8DEF)   // azul royal firma (botones/activos)
+    val cyanAccent = Color(0xFF7BA8F5) // azul claro para iconos/acentos suaves
+    val cyanSurface = Color(0xFF1F2C4E) // superficie azul-teñida
+    val violet = Color(0xFFA855F7)     // violeta glow (FAB / acento secundario)
+    val violetSurface = Color(0xFF372452)
+    val emerald = Color(0xFF4ADE80)
     val amber = Color(0xFFFBBF24)
     val rose = Color(0xFFFB7185)
-    val textPrimary = Color(0xFFF3F6FB)
+    val textPrimary = Color(0xFFF4F2FA)
 }
 
 /**
- * PALETA CLARA — "Porcelana Fría": fondo gris-azulado suave, tarjetas blancas puras,
- * acento teal profundo (profesional, nunca fluorescente sobre blanco).
+ * PALETA CLARA — "Lavanda Seda": fondo lavanda muy claro, tarjetas blancas puras flotando,
+ * azul royal profundo como acento (contraste AAA sobre blanco), violeta intenso secundario.
  */
 private object LightPalette {
-    val slate950 = Color(0xFFE7EDF5)   // fondo de página
+    val slate950 = Color(0xFFF2EFF9)   // fondo de página (lavanda claro)
     val slate900 = Color(0xFFFFFFFF)   // tarjetas
-    val slate800 = Color(0xFFE4EBF4)   // chips / superficies
-    val slate700 = Color(0xFFC4D2E4)   // bordes
-    val slate600 = Color(0xFF64748B)
-    val slate400 = Color(0xFF4E6076)   // texto secundario (contraste alto)
-    val slate200 = Color(0xFF2E3E52)
-    val slate100 = Color(0xFF101A2A)
-    val cyanNeon = Color(0xFF0E7490)   // teal profundo para claro
-    val cyanAccent = Color(0xFF0B6E99)
-    val cyanSurface = Color(0xFFD6F1F9)
-    val violet = Color(0xFF6D28D9)
-    val violetSurface = Color(0xFFEDE9FE)
-    val emerald = Color(0xFF047857)
+    val slate800 = Color(0xFFECE8F5)   // chips / superficies
+    val slate700 = Color(0xFFDDD6EA)   // separadores
+    val slate600 = Color(0xFF6B6580)
+    val slate400 = Color(0xFF4A4460)   // texto secundario (contraste alto)
+    val slate200 = Color(0xFF2E2940)
+    val slate100 = Color(0xFF1B1626)
+    val cyanNeon = Color(0xFF3B6FE0)   // azul royal profundo para claro
+    val cyanAccent = Color(0xFF2F5BC7)
+    val cyanSurface = Color(0xFFE3EBFC)
+    val violet = Color(0xFF7C3AED)
+    val violetSurface = Color(0xFFF0E9FD)
+    val emerald = Color(0xFF0E9F6E)
     val amber = Color(0xFFB45309)
-    val rose = Color(0xFFDC2626)
-    val textPrimary = Color(0xFF0B1526)
+    val rose = Color(0xFFE11D48)
+    val textPrimary = Color(0xFF1B1626)
 }
 
 val Slate950: Color get() = if (NeoxThemeState.isDark) DarkPalette.slate950 else LightPalette.slate950
@@ -81,15 +82,15 @@ val EmeraldSuccess: Color get() = if (NeoxThemeState.isDark) DarkPalette.emerald
 val AmberWarning: Color get() = if (NeoxThemeState.isDark) DarkPalette.amber else LightPalette.amber
 val RoseError: Color get() = if (NeoxThemeState.isDark) DarkPalette.rose else LightPalette.rose
 
-/** Texto principal sobre superficies: blanco-azulado en dark, casi-negro en light. */
+/** Texto principal sobre superficies: blanco-lila en dark, casi-negro ciruela en light. */
 val TextPrimary: Color get() = if (NeoxThemeState.isDark) DarkPalette.textPrimary else LightPalette.textPrimary
 
-/** Color "encima del cian": navy profundo sobre el cian (dark), blanco sobre el teal (light). */
-val OnCyan: Color get() = if (NeoxThemeState.isDark) Color(0xFF04222B) else Color(0xFFFFFFFF)
+/** Color "encima del azul royal": blanco en ambos temas (el azul es medio-profundo). */
+val OnCyan: Color get() = Color(0xFFFFFFFF)
 
 /** Extremo inferior del degradado del lienzo de la app (profundidad de página). */
-val AppBgDeep: Color get() = if (NeoxThemeState.isDark) Color(0xFF02040A) else Color(0xFFD9E2F0)
+val AppBgDeep: Color get() = if (NeoxThemeState.isDark) Color(0xFF120E1A) else Color(0xFFE4E0F0)
 
-/** Burbuja del usuario en el chat: azul fijo en ambos temas, con texto claro fijo. */
-val BubbleUserBg: Color get() = Color(0xFF0369A1)
-val OnBubbleUser: Color get() = Color(0xFFE0F2FE)
+/** Burbuja del usuario en el chat: azul royal fijo en ambos temas, con texto blanco fijo. */
+val BubbleUserBg: Color get() = Color(0xFF4D8AF0)
+val OnBubbleUser: Color get() = Color(0xFFFFFFFF)

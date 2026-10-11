@@ -72,7 +72,7 @@ fun SecurityLockScreen(
                 .padding(20.dp),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate700))
+            border = androidx.compose.foundation.BorderStroke(0.dp, androidx.compose.ui.graphics.Color.Transparent)
         ) {
             Column(
                 modifier = Modifier.padding(24.dp),

@@ -61,7 +61,7 @@ object ReminderNotificationHelper {
 
             val builder = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle("⏰ [$jobTag] $title")
+                .setContentTitle("AVISO — [$jobTag] $title")
                 .setContentText("$advanceNoticeText: $description")
                 .setStyle(
                     NotificationCompat.BigTextStyle()

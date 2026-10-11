@@ -400,7 +400,7 @@ fun AgendaListView(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Slate900),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate700))
+                border = androidx.compose.foundation.BorderStroke(0.dp, androidx.compose.ui.graphics.Color.Transparent)
             ) {
                 Column(modifier = Modifier.padding(0.dp)) {
                     com.example.ui.theme.AccentStrip()
@@ -526,7 +526,7 @@ fun AgendaListView(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = Slate900),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate800))
+                border = androidx.compose.foundation.BorderStroke(0.dp, androidx.compose.ui.graphics.Color.Transparent)
             ) {
                 Column(modifier = Modifier.padding(10.dp)) {
                     Text("Estado:", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
@@ -860,7 +860,7 @@ fun AgendaCalendarView(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Slate900),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate800))
+                border = androidx.compose.foundation.BorderStroke(0.dp, androidx.compose.ui.graphics.Color.Transparent)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(
@@ -1293,7 +1293,7 @@ fun KanbanItemCard(
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = Slate800),
-        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate700))
+        border = androidx.compose.foundation.BorderStroke(0.dp, androidx.compose.ui.graphics.Color.Transparent)
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             // Badges row
@@ -1556,7 +1556,7 @@ fun AgendaCollapsibleTreeView(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Slate900),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate800))
+                border = androidx.compose.foundation.BorderStroke(0.dp, androidx.compose.ui.graphics.Color.Transparent)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("Diagrama Jerárquico de Entregas", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
@@ -1782,7 +1782,7 @@ fun DiagramTaskCard(
             .clickable { isDetailExpanded = !isDetailExpanded },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Slate800),
-        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Slate700))
+        border = androidx.compose.foundation.BorderStroke(0.dp, androidx.compose.ui.graphics.Color.Transparent)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
